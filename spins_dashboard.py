@@ -86,31 +86,12 @@ if 'uploaded_brand_file' not in st.session_state:
 if 'uploaded_trend_file' not in st.session_state:
     st.session_state.uploaded_trend_file = None
 
-# Load data
-try:
-    brand_df = load_brand_data(st.session_state.uploaded_brand_file)
-    trend_df = load_trend_data(st.session_state.uploaded_trend_file)
-    data_loaded = True
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    data_loaded = False
+# Sidebar - Always show this first
+st.sidebar.title("📊 Dashboard Controls")
+st.sidebar.markdown("---")
 
-if data_loaded:
-    # Sidebar
-    st.sidebar.title("📊 Dashboard Controls")
-    st.sidebar.markdown("---")
-
-    # Navigation
-    page = st.sidebar.radio(
-        "Select View",
-        ["💡 Strategic Insights", "🏠 Executive Overview", "📈 Sales Performance", "🏆 Competitive Analysis",
-         "🏪 Retailer Performance", "📉 Trend Analysis", "🎯 Promotional Analysis"]
-    )
-
-    st.sidebar.markdown("---")
-
-    # File Upload Section
-    with st.sidebar.expander("📁 Upload New Data Files", expanded=False):
+# File Upload Section - Always visible
+with st.sidebar.expander("📁 Upload Data Files", expanded=True):
         st.markdown("Upload new weekly SPINS data to update the dashboard")
 
         brand_file = st.file_uploader(
@@ -154,7 +135,43 @@ if data_loaded:
         if st.session_state.uploaded_brand_file or st.session_state.uploaded_trend_file:
             st.info("📊 Using uploaded data")
         else:
-            st.info("📂 Using default data files")
+            st.info("📂 Waiting for data files...")
+
+st.sidebar.markdown("---")
+
+# Load data
+try:
+    brand_df = load_brand_data(st.session_state.uploaded_brand_file)
+    trend_df = load_trend_data(st.session_state.uploaded_trend_file)
+    data_loaded = True
+except Exception as e:
+    data_loaded = False
+    # Show friendly error message in main area
+    st.title("📊 SPINS Marketing Intelligence Dashboard")
+    st.markdown("---")
+    st.info("👈 **Please upload your SPINS data files using the sidebar to get started!**")
+    st.markdown("""
+    ### Required Files:
+    1. **Brand & Retailers File** - SPINs Brand and Retailers Excel file (.xlsx)
+    2. **Trend Data File** - SPINs Humble Trended Sale Excel file (.xlsx)
+
+    ### How to Upload:
+    - Click on "📁 Upload Data Files" in the left sidebar
+    - Select both Excel files
+    - Click "Load Files"
+
+    Your data stays secure and is only stored temporarily for this session.
+    """)
+    st.stop()
+
+# If data loaded successfully, continue with dashboard
+if data_loaded:
+    # Navigation
+    page = st.sidebar.radio(
+        "Select View",
+        ["💡 Strategic Insights", "🏠 Executive Overview", "📈 Sales Performance", "🏆 Competitive Analysis",
+         "🏪 Retailer Performance", "📉 Trend Analysis", "🎯 Promotional Analysis"]
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Filters")
