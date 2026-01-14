@@ -7,7 +7,6 @@ import numpy as np
 from datetime import datetime
 import json
 import io
-import sqlite3
 from pathlib import Path
 import hashlib
 
@@ -192,166 +191,89 @@ def load_powertabs_data(file_source=None):
         st.error(f"Error loading PowerTabs data: {e}")
         return None
 
-# Database Functions
-DB_PATH = Path(__file__).parent / "spins_history.db"
-
-def init_database():
-    """Initialize the SQLite database for historical data"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Create historical_snapshots table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS historical_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            upload_date TEXT NOT NULL,
-            data_period TEXT,
-            sales_52w REAL,
-            sales_growth_52w REAL,
-            units_52w REAL,
-            units_growth_52w REAL,
-            retailer_count INTEGER,
-            top_retailer TEXT,
-            top_retailer_sales REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(data_period)
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-
-def save_snapshot_to_db(data):
-    """Save current PowerTabs snapshot to database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    upload_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    data_period = data.get('period_info', '')
-
-    # Extract 52-week metrics
-    sales_52w = None
-    sales_growth_52w = None
-    units_52w = None
-    units_growth_52w = None
-
-    if 'overview' in data and not data['overview'].empty:
-        overview = data['overview']
-        week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
-        if not week_52.empty:
-            sales_52w = float(week_52.iloc[0, 1])
-            sales_growth_52w = float(week_52.iloc[0, 2])
-            units_52w = float(week_52.iloc[0, 3])
-            units_growth_52w = float(week_52.iloc[0, 4])
-
-    # Extract retailer info
-    retailer_count = None
-    top_retailer = None
-    top_retailer_sales = None
-
-    if 'retailers' in data and not data['retailers'].empty:
-        retailers = data['retailers']
-        retailer_count = len(retailers)
-        top_retailer = retailers.iloc[0, 0]
-        top_retailer_sales = float(retailers.iloc[0, 1])
-
-    try:
-        # Use REPLACE to update if data_period already exists
-        cursor.execute('''
-            REPLACE INTO historical_snapshots
-            (upload_date, data_period, sales_52w, sales_growth_52w, units_52w,
-             units_growth_52w, retailer_count, top_retailer, top_retailer_sales)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (upload_date, data_period, sales_52w, sales_growth_52w, units_52w,
-              units_growth_52w, retailer_count, top_retailer, top_retailer_sales))
-
-        conn.commit()
-        return True
-    except Exception as e:
-        st.error(f"Error saving to database: {e}")
-        return False
-    finally:
-        conn.close()
-
-def load_historical_from_db():
-    """Load all historical snapshots from database"""
-    if not DB_PATH.exists():
-        return pd.DataFrame()
-
-    conn = sqlite3.connect(DB_PATH)
-    query = '''
-        SELECT upload_date, data_period, sales_52w, sales_growth_52w,
-               units_52w, units_growth_52w, retailer_count, top_retailer,
-               top_retailer_sales, created_at
-        FROM historical_snapshots
-        ORDER BY created_at
-    '''
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
-
-def delete_snapshot_from_db(data_period):
-    """Delete a specific snapshot from database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM historical_snapshots WHERE data_period = ?', (data_period,))
-    conn.commit()
-    conn.close()
-
-# Initialize database
-init_database()
+# Helper function to extract file label/date
+def get_file_label(uploaded_file):
+    """Extract a user-friendly label from the uploaded file"""
+    if uploaded_file is None:
+        return "Unknown"
+    # Try to extract date from filename if it has a pattern
+    filename = uploaded_file.name
+    # Just return the filename for now
+    return filename
 
 # Initialize session state
-if 'uploaded_powertabs_file' not in st.session_state:
-    st.session_state.uploaded_powertabs_file = None
+if 'uploaded_powertabs_files' not in st.session_state:
+    st.session_state.uploaded_powertabs_files = []
+if 'selected_file_index' not in st.session_state:
+    st.session_state.selected_file_index = 0
 
 # Sidebar - Always show first
 st.sidebar.title("📊 Dashboard Controls")
 st.sidebar.markdown("---")
 
 # File Upload Section - Always visible
-with st.sidebar.expander("📁 Upload SPINS PowerTabs File", expanded=True):
-    st.markdown("Upload your SPINS PowerTabs Excel file to analyze data")
+with st.sidebar.expander("📁 Upload SPINS PowerTabs Files", expanded=True):
+    st.markdown("Upload one or more SPINS PowerTabs Excel files to analyze and compare data")
 
-    powertabs_file = st.file_uploader(
-        "SPINS PowerTabs File",
+    powertabs_files = st.file_uploader(
+        "SPINS PowerTabs Files",
         type=['xlsx'],
+        accept_multiple_files=True,
         key='powertabs_uploader',
-        help="Upload the SPINS PowerTabs - Entire Report.xlsx file"
+        help="Upload one or more SPINS PowerTabs - Entire Report.xlsx files"
     )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Load File", type="primary"):
-            if powertabs_file:
-                st.session_state.uploaded_powertabs_file = powertabs_file
+        if st.button("Load Files", type="primary"):
+            if powertabs_files:
+                st.session_state.uploaded_powertabs_files = powertabs_files
+                st.session_state.selected_file_index = 0
                 load_powertabs_data.clear()
-                st.success("✓ PowerTabs data loaded")
+                st.success(f"✓ {len(powertabs_files)} file(s) loaded")
                 st.rerun()
 
     with col2:
-        if st.button("Reset to Default"):
-            st.session_state.uploaded_powertabs_file = None
+        if st.button("Clear All"):
+            st.session_state.uploaded_powertabs_files = []
+            st.session_state.selected_file_index = 0
             load_powertabs_data.clear()
             st.rerun()
 
     # Show current data source
-    if st.session_state.uploaded_powertabs_file:
-        st.info("📊 Using uploaded data")
+    if st.session_state.uploaded_powertabs_files:
+        st.info(f"📊 {len(st.session_state.uploaded_powertabs_files)} file(s) uploaded")
     else:
-        st.info("📂 Waiting for PowerTabs file...")
+        st.info("📂 Waiting for PowerTabs file(s)...")
 
 st.sidebar.markdown("---")
 
-# Load data
-data = load_powertabs_data(st.session_state.uploaded_powertabs_file)
+# File selector if multiple files uploaded
+if len(st.session_state.uploaded_powertabs_files) > 1:
+    st.sidebar.markdown("### 📂 Select File to Analyze")
+    file_options = [get_file_label(f) for f in st.session_state.uploaded_powertabs_files]
+    selected_file_name = st.sidebar.selectbox(
+        "Choose a file",
+        file_options,
+        index=st.session_state.selected_file_index,
+        help="Select which PowerTabs file to view in the dashboard"
+    )
+    st.session_state.selected_file_index = file_options.index(selected_file_name)
+    st.sidebar.markdown("---")
+
+# Load data from the selected file
+current_file = None
+if st.session_state.uploaded_powertabs_files:
+    current_file = st.session_state.uploaded_powertabs_files[st.session_state.selected_file_index]
+
+data = load_powertabs_data(current_file)
 
 if data is None or 'overview' not in data:
     # Show friendly error message in main area
     st.title("📊 SPINS Marketing Intelligence Dashboard")
     st.markdown("---")
-    st.info("👈 **Please upload your SPINS PowerTabs file using the sidebar to get started!**")
+    st.info("👈 **Please upload your SPINS PowerTabs file(s) using the sidebar to get started!**")
     st.markdown("""
     ### Required File:
     **SPINS PowerTabs - Entire Report.xlsx**
@@ -363,9 +285,11 @@ if data is None or 'overview' not in data:
     - Growth drivers
 
     ### How to Upload:
-    1. Click on "📁 Upload SPINS PowerTabs File" in the left sidebar
-    2. Select your PowerTabs Excel file
-    3. Click "Load File"
+    1. Click on "📁 Upload SPINS PowerTabs Files" in the left sidebar
+    2. Select one or more PowerTabs Excel files
+    3. Click "Load Files"
+
+    **Multiple Files:** Upload multiple monthly reports to compare trends over time in the Historical Trends tab!
 
     Your data stays secure and is only stored temporarily for this session.
     """)
@@ -384,27 +308,6 @@ selected_period = st.sidebar.selectbox(
     index=0,  # Default to 52 Weeks
     help="Choose the time horizon for your analysis"
 )
-
-st.sidebar.markdown("---")
-
-# Add current data to history button
-st.sidebar.markdown("### 💾 Save to Historical Database")
-
-# Get historical count
-historical_df = load_historical_from_db()
-snapshot_count = len(historical_df)
-
-if st.sidebar.button("📸 Save Current Snapshot", type="primary"):
-    if save_snapshot_to_db(data):
-        st.sidebar.success(f"✓ Saved to database!")
-        st.rerun()
-    else:
-        st.sidebar.error("Failed to save snapshot")
-
-if snapshot_count > 0:
-    st.sidebar.info(f"📊 {snapshot_count} snapshots in database")
-else:
-    st.sidebar.info("No historical data yet")
 
 st.sidebar.markdown("---")
 
@@ -1080,29 +983,21 @@ elif page == "📊 Historical Trends":
     st.markdown("**Compare performance across multiple time periods**")
     st.markdown("---")
 
-    # Load historical data from database
-    try:
-        hist_df = load_historical_from_db()
-    except Exception as e:
-        st.error(f"Error loading database: {e}")
-        hist_df = pd.DataFrame()
+    num_files = len(st.session_state.uploaded_powertabs_files)
 
-    if hist_df.empty or len(hist_df) == 0:
-        st.info("👈 **No historical data yet!**")
+    if num_files == 0:
+        st.info("👈 **No data uploaded yet!**")
         st.markdown("""
-        ### How to Build Historical Data:
+        ### How to View Historical Trends:
 
-        1. **Upload your PowerTabs file** (already loaded ✓)
-        2. **Click "📸 Save Current Snapshot"** in the sidebar
-        3. **Done!** Data is automatically saved to the database
+        Upload one or more PowerTabs files in the sidebar to see trends!
 
-        **Next month:**
-        1. Upload new PowerTabs file
-        2. Click "Save Current Snapshot" again
-        3. View trends in this tab!
-
-        The database persists automatically - no manual file management needed!
+        **Single File:** See trends across 52W, 24W, 12W, 4W time periods
+        **Multiple Files:** Compare month-over-month performance across all uploaded files
         """)
+        st.stop()
+    elif num_files == 1:
+        st.info("💡 **Single File Uploaded:** Showing trends across time periods (52W, 24W, 12W, 4W). Upload multiple monthly PowerTabs files to see month-over-month comparisons!")
     # Show current PowerTabs trends (from different time periods in current data)
     if data and 'overview' in data:
         st.markdown("### 📈 Current Period Trends")
@@ -1162,143 +1057,157 @@ elif page == "📊 Historical Trends":
 
         st.dataframe(display_overview, use_container_width=True, hide_index=True)
 
-    # Month-over-Month comparison (when multiple snapshots exist)
-    if len(hist_df) == 1:
+    # Month-over-Month comparison (when multiple files uploaded)
+    if num_files > 1:
         st.markdown("---")
-        st.info("💡 **Month-over-Month Comparison:** You have 1 snapshot saved. Next month, upload new PowerTabs data and save another snapshot to see month-over-month trends!")
+        st.markdown("### 📅 File-by-File Comparison")
+        st.success(f"✅ **You have {num_files} files uploaded!**")
 
-    if len(hist_df) > 1:
-        # Multiple snapshots - show month-over-month comparison
-        st.markdown("---")
-        st.markdown("### 📅 Month-over-Month Comparison")
-        st.success(f"✅ **You have {len(hist_df)} snapshots saved!**")
+        # Load data from all files
+        multi_file_data = []
+        for i, file in enumerate(st.session_state.uploaded_powertabs_files):
+            file_data = load_powertabs_data(file)
+            if file_data and 'overview' in file_data:
+                overview = file_data['overview']
+                week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
+                if not week_52.empty:
+                    file_label = get_file_label(file)
+                    multi_file_data.append({
+                        'file_label': file_label,
+                        'sales_52w': float(week_52.iloc[0, 1]),
+                        'sales_growth_52w': float(week_52.iloc[0, 2]),
+                        'units_52w': float(week_52.iloc[0, 3]),
+                        'units_growth_52w': float(week_52.iloc[0, 4]),
+                        'retailer_count': len(file_data.get('retailers', []))
+                    })
 
-        # Prepare data for charts
-        hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
-        hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
+        if len(multi_file_data) > 0:
+            hist_df = pd.DataFrame(multi_file_data)
 
-        # Month-over-Month Sales Trend
-        st.markdown("#### 💵 Sales Trend (Month-over-Month)")
+            # Sales Trend Across Files
+            st.markdown("#### 💵 Sales Trend (52-Week)")
 
-        fig_sales = go.Figure()
-        fig_sales.add_trace(go.Scatter(
-            x=hist_df['data_period'],
-            y=hist_df['sales_52w'],
-            mode='lines+markers',
-            name='Sales',
-            text=[f"${val/1e6:.2f}M" for val in hist_df['sales_52w']],
-            textposition='top center',
-            line=dict(color='#1f77b4', width=3),
-            marker=dict(size=10)
-        ))
-
-        fig_sales.update_layout(
-            title="52-Week Sales Trend",
-            xaxis_title="Period",
-            yaxis_title="Sales ($)",
-            height=400,
-            showlegend=False,
-            xaxis_tickangle=-45
-        )
-
-        st.plotly_chart(fig_sales, use_container_width=True)
-
-        # Growth Rate Comparison
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("### 📊 Sales Growth %")
-            fig_growth = go.Figure()
-            fig_growth.add_trace(go.Bar(
-                x=hist_df['data_period'],
-                y=hist_df['sales_growth'],
-                text=[f"{val:+.1f}%" for val in hist_df['sales_growth']],
-                textposition='outside',
-                marker_color=['#28a745' if x > 0 else '#dc3545' for x in hist_df['sales_growth']]
+            fig_sales = go.Figure()
+            fig_sales.add_trace(go.Scatter(
+                x=hist_df['file_label'],
+                y=hist_df['sales_52w'],
+                mode='lines+markers',
+                name='Sales',
+                text=[f"${val/1e6:.2f}M" for val in hist_df['sales_52w']],
+                textposition='top center',
+                line=dict(color='#1f77b4', width=3),
+                marker=dict(size=10)
             ))
-            fig_growth.update_layout(
-                xaxis_title="Period",
-                yaxis_title="Growth %",
-                height=350,
+
+            fig_sales.update_layout(
+                xaxis_title="File",
+                yaxis_title="Sales ($)",
+                height=400,
                 showlegend=False,
                 xaxis_tickangle=-45
             )
-            st.plotly_chart(fig_growth, use_container_width=True)
 
-        with col2:
-            st.markdown("### 🏪 Retailer Count")
-            fig_retailers = go.Figure()
-            fig_retailers.add_trace(go.Bar(
-                x=hist_df['data_period'],
-                y=hist_df['retailer_count'],
-                text=hist_df['retailer_count'],
-                textposition='outside',
-                marker_color='#17a2b8'
-            ))
-            fig_retailers.update_layout(
-                xaxis_title="Period",
-                yaxis_title="Number of Retailers",
-                height=350,
-                showlegend=False,
-                xaxis_tickangle=-45
-            )
-            st.plotly_chart(fig_retailers, use_container_width=True)
+            st.plotly_chart(fig_sales, use_container_width=True)
 
-        # Historical Data Table
-        st.markdown("---")
-        st.markdown("### 📋 Historical Data Summary")
-
-        display_hist = hist_df[['upload_date', 'data_period', 'sales_52w', 'sales_growth', 'units_52w', 'units_growth', 'retailer_count']].copy()
-        display_hist['sales_52w'] = display_hist['sales_52w'].apply(lambda x: f"${x/1e6:.2f}M")
-        display_hist['sales_growth'] = display_hist['sales_growth'].apply(lambda x: f"{x:+.1f}%")
-        display_hist['units_52w'] = display_hist['units_52w'].apply(lambda x: f"{x/1e3:.1f}K")
-        display_hist['units_growth'] = display_hist['units_growth'].apply(lambda x: f"{x:+.1f}%")
-
-        display_hist.columns = ['Saved On', 'Data Period', 'Sales (52W)', 'Sales Growth %', 'Units (52W)', 'Units Growth %', 'Retailers']
-
-        st.dataframe(display_hist, use_container_width=True, hide_index=True)
-
-        # Period-over-Period Comparison
-        if len(hist_df) >= 2:
-            st.markdown("---")
-            st.markdown("### 🔄 Period-over-Period Changes")
-
-            latest = hist_df.iloc[-1]
-            previous = hist_df.iloc[-2]
-
-            col1, col2, col3, col4 = st.columns(4)
+            # Growth Rate Comparison
+            col1, col2 = st.columns(2)
 
             with col1:
-                sales_change = ((latest['sales_52w'] - previous['sales_52w']) / previous['sales_52w']) * 100
-                st.metric(
-                    "Sales Change",
-                    f"${latest['sales_52w']/1e6:.2f}M",
-                    f"{sales_change:+.1f}%"
+                st.markdown("### 📊 Sales Growth % (52W)")
+                fig_growth = go.Figure()
+                fig_growth.add_trace(go.Bar(
+                    x=hist_df['file_label'],
+                    y=hist_df['sales_growth_52w'] * 100,
+                    text=[f"{val*100:+.1f}%" for val in hist_df['sales_growth_52w']],
+                    textposition='outside',
+                    marker_color=['#28a745' if x > 0 else '#dc3545' for x in hist_df['sales_growth_52w']]
+                ))
+                fig_growth.update_layout(
+                    xaxis_title="File",
+                    yaxis_title="Growth %",
+                    height=350,
+                    showlegend=False,
+                    xaxis_tickangle=-45
                 )
+                st.plotly_chart(fig_growth, use_container_width=True)
 
             with col2:
-                growth_change = latest['sales_growth'] - previous['sales_growth']
-                st.metric(
-                    "Growth Rate Change",
-                    f"{latest['sales_growth']:+.1f}%",
-                    f"{growth_change:+.1f}pp"
+                st.markdown("### 🏪 Retailer Count")
+                fig_retailers = go.Figure()
+                fig_retailers.add_trace(go.Bar(
+                    x=hist_df['file_label'],
+                    y=hist_df['retailer_count'],
+                    text=hist_df['retailer_count'],
+                    textposition='outside',
+                    marker_color='#17a2b8'
+                ))
+                fig_retailers.update_layout(
+                    xaxis_title="File",
+                    yaxis_title="Number of Retailers",
+                    height=350,
+                    showlegend=False,
+                    xaxis_tickangle=-45
                 )
+                st.plotly_chart(fig_retailers, use_container_width=True)
 
-            with col3:
-                units_change = ((latest['units_52w'] - previous['units_52w']) / previous['units_52w']) * 100
-                st.metric(
-                    "Units Change",
-                    f"{latest['units_52w']/1e3:.1f}K",
-                    f"{units_change:+.1f}%"
-                )
+            # Historical Data Table
+            st.markdown("---")
+            st.markdown("### 📋 File Comparison Summary")
 
-            with col4:
-                retailer_change = int(latest['retailer_count'] - previous['retailer_count'])
-                st.metric(
-                    "Retailer Change",
-                    int(latest['retailer_count']),
-                    f"{retailer_change:+d}"
-                )
+            display_hist = hist_df.copy()
+            display_hist['sales_52w_fmt'] = display_hist['sales_52w'].apply(lambda x: f"${x/1e6:.2f}M")
+            display_hist['sales_growth_fmt'] = display_hist['sales_growth_52w'].apply(lambda x: f"{x*100:+.1f}%")
+            display_hist['units_52w_fmt'] = display_hist['units_52w'].apply(lambda x: f"{x/1e3:.1f}K")
+            display_hist['units_growth_fmt'] = display_hist['units_growth_52w'].apply(lambda x: f"{x*100:+.1f}%")
+
+            display_hist = display_hist[['file_label', 'sales_52w_fmt', 'sales_growth_fmt', 'units_52w_fmt', 'units_growth_fmt', 'retailer_count']]
+            display_hist.columns = ['File', 'Sales (52W)', 'Sales Growth %', 'Units (52W)', 'Units Growth %', 'Retailers']
+
+            st.dataframe(display_hist, use_container_width=True, hide_index=True)
+
+            # File-to-File Comparison (latest vs previous)
+            if len(hist_df) >= 2:
+                st.markdown("---")
+                st.markdown("### 🔄 Latest vs Previous File")
+
+                latest = hist_df.iloc[-1]
+                previous = hist_df.iloc[-2]
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    sales_change = ((latest['sales_52w'] - previous['sales_52w']) / previous['sales_52w']) * 100
+                    st.metric(
+                        "Sales Change",
+                        f"${latest['sales_52w']/1e6:.2f}M",
+                        f"{sales_change:+.1f}%"
+                    )
+
+                with col2:
+                    growth_change = (latest['sales_growth_52w'] - previous['sales_growth_52w']) * 100
+                    st.metric(
+                        "Growth Rate Change",
+                        f"{latest['sales_growth_52w']*100:+.1f}%",
+                        f"{growth_change:+.1f}pp"
+                    )
+
+                with col3:
+                    units_change = ((latest['units_52w'] - previous['units_52w']) / previous['units_52w']) * 100
+                    st.metric(
+                        "Units Change",
+                        f"{latest['units_52w']/1e3:.1f}K",
+                        f"{units_change:+.1f}%"
+                    )
+
+                with col4:
+                    retailer_change = int(latest['retailer_count'] - previous['retailer_count'])
+                    st.metric(
+                        "Retailer Change",
+                        int(latest['retailer_count']),
+                        f"{retailer_change:+d}"
+                    )
+        else:
+            st.warning("Could not load data from uploaded files")
 
 # Footer
 st.markdown("---")
