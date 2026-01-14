@@ -23,8 +23,8 @@ st.set_page_config(
 def check_password():
     """Returns True if the user has entered the correct password."""
 
-    # Password hash for 1336Gusdorf!
-    CORRECT_PASSWORD_HASH = "4be3b4171f398c0851b8f469a0ff7b6a9efb5e06b8fcbd514176c1ae3bd2f038"
+    # Password hash for humble2025 (TEMPORARY - will change back to 1336Gusdorf!)
+    CORRECT_PASSWORD_HASH = "3e668bb3d7fc5743385fec4966fd9598cdd610a17c728eacd5a64c62b3a1cbc1"
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
