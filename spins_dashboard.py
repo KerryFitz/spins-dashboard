@@ -55,17 +55,21 @@ def load_powertabs_data(file_source=None):
     try:
         # Overview - Key metrics by time period
         df_overview = pd.read_excel(file_path, sheet_name='Overview', header=None)
-        # Extract the data starting from row 2 (0-indexed)
-        overview_data = df_overview.iloc[2:].copy()
-        overview_data.columns = df_overview.iloc[2].values
-        overview_data = overview_data.iloc[1:].reset_index(drop=True)
+        # Extract period info from row 1 (0-indexed)
+        period_info = df_overview.iloc[1, 0] if len(df_overview) > 1 else ""
+        data['period_info'] = period_info
+
+        # Headers are on row 3, data starts on row 4
+        overview_data = df_overview.iloc[4:].copy()
+        overview_data.columns = df_overview.iloc[3].values
+        overview_data = overview_data.reset_index(drop=True)
         data['overview'] = overview_data
 
         # Brand by Retailer
         df_retailers = pd.read_excel(file_path, sheet_name='Brand by Retailer', header=None)
-        retailers_data = df_retailers.iloc[2:].copy()
-        retailers_data.columns = df_retailers.iloc[2].values
-        retailers_data = retailers_data.iloc[1:].reset_index(drop=True)
+        retailers_data = df_retailers.iloc[4:].copy()
+        retailers_data.columns = df_retailers.iloc[3].values
+        retailers_data = retailers_data.reset_index(drop=True)
         # Clean numeric columns
         for col in ['Sales', 'Absolute Chg', '% Chg']:
             if col in retailers_data.columns:
@@ -74,9 +78,9 @@ def load_powertabs_data(file_source=None):
 
         # Retailer Growth - Detailed metrics
         df_retailer_growth = pd.read_excel(file_path, sheet_name='Retailer Growth', header=None)
-        retailer_growth_data = df_retailer_growth.iloc[2:].copy()
-        retailer_growth_data.columns = df_retailer_growth.iloc[2].values
-        retailer_growth_data = retailer_growth_data.iloc[1:].reset_index(drop=True)
+        retailer_growth_data = df_retailer_growth.iloc[4:].copy()
+        retailer_growth_data.columns = df_retailer_growth.iloc[3].values
+        retailer_growth_data = retailer_growth_data.reset_index(drop=True)
         # Clean numeric columns
         numeric_cols = [col for col in retailer_growth_data.columns if col not in ['Top 10 Retailers by Dollar Change', 'Primary Driver of Growth']]
         for col in numeric_cols:
@@ -85,9 +89,9 @@ def load_powertabs_data(file_source=None):
 
         # Growth Drivers
         df_growth = pd.read_excel(file_path, sheet_name='Growth Drivers', header=None)
-        growth_data = df_growth.iloc[2:].copy()
-        growth_data.columns = df_growth.iloc[2].values
-        growth_data = growth_data.iloc[1:].reset_index(drop=True)
+        growth_data = df_growth.iloc[4:].copy()
+        growth_data.columns = df_growth.iloc[3].values
+        growth_data = growth_data.reset_index(drop=True)
         for col in growth_data.columns:
             if col != 'Driver':
                 growth_data[col] = pd.to_numeric(growth_data[col], errors='coerce')
@@ -96,9 +100,9 @@ def load_powertabs_data(file_source=None):
         # Promo Summary
         try:
             df_promo = pd.read_excel(file_path, sheet_name='Promo Summary', header=None)
-            promo_data = df_promo.iloc[2:].copy()
-            promo_data.columns = df_promo.iloc[2].values
-            promo_data = promo_data.iloc[1:].reset_index(drop=True)
+            promo_data = df_promo.iloc[4:].copy()
+            promo_data.columns = df_promo.iloc[3].values
+            promo_data = promo_data.reset_index(drop=True)
             for col in promo_data.columns:
                 if col != 'Promo Type':
                     promo_data[col] = pd.to_numeric(promo_data[col], errors='coerce')
@@ -109,16 +113,12 @@ def load_powertabs_data(file_source=None):
         # Brand vs Category
         try:
             df_category = pd.read_excel(file_path, sheet_name='Brand vs. Category', header=None)
-            category_data = df_category.iloc[2:].copy()
-            category_data.columns = df_category.iloc[2].values
-            category_data = category_data.iloc[1:].reset_index(drop=True)
+            category_data = df_category.iloc[4:].copy()
+            category_data.columns = df_category.iloc[3].values
+            category_data = category_data.reset_index(drop=True)
             data['category'] = category_data
         except:
             data['category'] = pd.DataFrame()
-
-        # Extract period info from first row
-        period_info = df_overview.iloc[0, 0] if not df_overview.empty else ""
-        data['period_info'] = period_info
 
         return data
 
