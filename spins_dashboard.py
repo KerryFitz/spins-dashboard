@@ -998,51 +998,82 @@ elif page == "📊 Historical Trends":
 
         The database persists automatically - no manual file management needed!
         """)
-    elif len(hist_df) == 1:
-        st.success("✅ **You have 1 snapshot saved!**")
-        st.info("💡 **To see trends, you need at least 2 snapshots.** Come back next month after uploading new PowerTabs data and saving another snapshot!")
+    # Show current PowerTabs trends (from different time periods in current data)
+    if data and 'overview' in data:
+        st.markdown("### 📈 Current Period Trends")
+        st.markdown("**Performance across different time horizons in your current PowerTabs data**")
 
-        st.markdown("---")
-        st.markdown("### 📊 Your Saved Snapshot")
+        overview = data['overview']
 
-        # Show the snapshot details
-        snapshot = hist_df.iloc[0]
-
-        col1, col2, col3, col4 = st.columns(4)
+        # Sales by time period
+        col1, col2 = st.columns(2)
 
         with col1:
-            st.metric("Sales (52W)", f"${snapshot['sales_52w']/1e6:.2f}M")
+            st.markdown("#### 💵 Sales by Time Period")
+            fig_sales_periods = go.Figure()
+            fig_sales_periods.add_trace(go.Bar(
+                x=overview.iloc[:, 0],
+                y=overview.iloc[:, 1],
+                text=[f"${val/1e6:.2f}M" for val in overview.iloc[:, 1]],
+                textposition='outside',
+                marker_color='#1f77b4'
+            ))
+            fig_sales_periods.update_layout(
+                xaxis_title="Time Period",
+                yaxis_title="Sales ($)",
+                height=400,
+                showlegend=False
+            )
+            st.plotly_chart(fig_sales_periods, use_container_width=True)
+
         with col2:
-            st.metric("Sales Growth", f"{snapshot['sales_growth_52w']*100:+.1f}%")
-        with col3:
-            st.metric("Units (52W)", f"{snapshot['units_52w']/1e3:.1f}K")
-        with col4:
-            st.metric("Retailers", int(snapshot['retailer_count']))
+            st.markdown("#### 📈 Growth Rate by Time Period")
+            fig_growth_periods = go.Figure()
+            fig_growth_periods.add_trace(go.Bar(
+                x=overview.iloc[:, 0],
+                y=overview.iloc[:, 2] * 100,
+                text=[f"{val*100:+.1f}%" for val in overview.iloc[:, 2]],
+                textposition='outside',
+                marker_color=['#28a745' if x > 0 else '#dc3545' for x in overview.iloc[:, 2]]
+            ))
+            fig_growth_periods.update_layout(
+                xaxis_title="Time Period",
+                yaxis_title="Growth %",
+                height=400,
+                showlegend=False
+            )
+            st.plotly_chart(fig_growth_periods, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### 📋 Snapshot Details")
+        st.markdown("### 📊 Performance Metrics")
 
-        details_df = pd.DataFrame([{
-            'Saved On': snapshot['upload_date'],
-            'Data Period': snapshot['data_period'],
-            'Top Retailer': snapshot['top_retailer'],
-            'Top Retailer Sales': f"${snapshot['top_retailer_sales']/1e6:.2f}M"
-        }])
+        # Show all time periods in a table
+        display_overview = overview.copy()
+        display_overview.columns = ['Time Period', 'Dollars', 'Dollars % Chg', 'Units', 'Units % Chg']
+        display_overview['Dollars'] = display_overview['Dollars'].apply(lambda x: f"${x/1e6:.2f}M")
+        display_overview['Dollars % Chg'] = display_overview['Dollars % Chg'].apply(lambda x: f"{x*100:+.1f}%")
+        display_overview['Units'] = display_overview['Units'].apply(lambda x: f"{x/1e3:.1f}K")
+        display_overview['Units % Chg'] = display_overview['Units % Chg'].apply(lambda x: f"{x*100:+.1f}%")
 
-        st.dataframe(details_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_overview, use_container_width=True, hide_index=True)
 
-        st.info("**Next Step:** Wait until next month, upload new PowerTabs data, and save another snapshot. Then you'll see trend charts here!")
+    # Month-over-Month comparison (when multiple snapshots exist)
+    if len(hist_df) == 1:
+        st.markdown("---")
+        st.info("💡 **Month-over-Month Comparison:** You have 1 snapshot saved. Next month, upload new PowerTabs data and save another snapshot to see month-over-month trends!")
 
-    else:
-        # Multiple snapshots - show trends
+    if len(hist_df) > 1:
+        # Multiple snapshots - show month-over-month comparison
+        st.markdown("---")
+        st.markdown("### 📅 Month-over-Month Comparison")
         st.success(f"✅ **You have {len(hist_df)} snapshots saved!**")
 
         # Prepare data for charts
         hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
         hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
 
-        # Sales Trend
-        st.markdown("### 📈 Sales Trend Over Time")
+        # Month-over-Month Sales Trend
+        st.markdown("#### 💵 Sales Trend (Month-over-Month)")
 
         fig_sales = go.Figure()
         fig_sales.add_trace(go.Scatter(
