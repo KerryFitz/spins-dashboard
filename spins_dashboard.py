@@ -978,14 +978,6 @@ elif page == "📊 Historical Trends":
     # Load historical data from database
     try:
         hist_df = load_historical_from_db()
-
-        # Debug info
-        st.info(f"📊 Database status: Found {len(hist_df)} snapshots")
-
-        if len(hist_df) > 0:
-            st.write("**Database columns:**", list(hist_df.columns))
-            st.write("**First row:**", hist_df.iloc[0].to_dict() if len(hist_df) > 0 else "No data")
-
     except Exception as e:
         st.error(f"Error loading database: {e}")
         hist_df = pd.DataFrame()
@@ -1006,44 +998,74 @@ elif page == "📊 Historical Trends":
 
         The database persists automatically - no manual file management needed!
         """)
+    elif len(hist_df) == 1:
+        st.success("✅ **You have 1 snapshot saved!**")
+        st.info("💡 **To see trends, you need at least 2 snapshots.** Come back next month after uploading new PowerTabs data and saving another snapshot!")
+
+        st.markdown("---")
+        st.markdown("### 📊 Your Saved Snapshot")
+
+        # Show the snapshot details
+        snapshot = hist_df.iloc[0]
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Sales (52W)", f"${snapshot['sales_52w']/1e6:.2f}M")
+        with col2:
+            st.metric("Sales Growth", f"{snapshot['sales_growth_52w']*100:+.1f}%")
+        with col3:
+            st.metric("Units (52W)", f"{snapshot['units_52w']/1e3:.1f}K")
+        with col4:
+            st.metric("Retailers", int(snapshot['retailer_count']))
+
+        st.markdown("---")
+        st.markdown("### 📋 Snapshot Details")
+
+        details_df = pd.DataFrame([{
+            'Saved On': snapshot['upload_date'],
+            'Data Period': snapshot['data_period'],
+            'Top Retailer': snapshot['top_retailer'],
+            'Top Retailer Sales': f"${snapshot['top_retailer_sales']/1e6:.2f}M"
+        }])
+
+        st.dataframe(details_df, use_container_width=True, hide_index=True)
+
+        st.info("**Next Step:** Wait until next month, upload new PowerTabs data, and save another snapshot. Then you'll see trend charts here!")
+
     else:
+        # Multiple snapshots - show trends
+        st.success(f"✅ **You have {len(hist_df)} snapshots saved!**")
+
         # Prepare data for charts
-        try:
-            hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
-            hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
-        except Exception as e:
-            st.error(f"Error preparing data: {e}")
-            st.stop()
+        hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
+        hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
 
         # Sales Trend
         st.markdown("### 📈 Sales Trend Over Time")
 
-        try:
-            fig_sales = go.Figure()
-            fig_sales.add_trace(go.Scatter(
-                x=hist_df['data_period'],
-                y=hist_df['sales_52w'],
-                mode='lines+markers',
-                name='Sales',
-                text=[f"${val/1e6:.2f}M" for val in hist_df['sales_52w']],
-                textposition='top center',
-                line=dict(color='#1f77b4', width=3),
-                marker=dict(size=10)
-            ))
+        fig_sales = go.Figure()
+        fig_sales.add_trace(go.Scatter(
+            x=hist_df['data_period'],
+            y=hist_df['sales_52w'],
+            mode='lines+markers',
+            name='Sales',
+            text=[f"${val/1e6:.2f}M" for val in hist_df['sales_52w']],
+            textposition='top center',
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=10)
+        ))
 
-            fig_sales.update_layout(
-                title="52-Week Sales Trend",
-                xaxis_title="Period",
-                yaxis_title="Sales ($)",
-                height=400,
-                showlegend=False,
-                xaxis_tickangle=-45
-            )
+        fig_sales.update_layout(
+            title="52-Week Sales Trend",
+            xaxis_title="Period",
+            yaxis_title="Sales ($)",
+            height=400,
+            showlegend=False,
+            xaxis_tickangle=-45
+        )
 
-            st.plotly_chart(fig_sales, use_container_width=True)
-        except Exception as e:
-            st.error(f"Error creating sales chart: {e}")
-            st.write("**Debug - hist_df:**", hist_df)
+        st.plotly_chart(fig_sales, use_container_width=True)
 
         # Growth Rate Comparison
         col1, col2 = st.columns(2)
