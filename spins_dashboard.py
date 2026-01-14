@@ -999,21 +999,6 @@ elif page == "📊 Historical Trends":
         hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
         hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
 
-        # Add current data to comparison
-        overview = data['overview']
-        week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
-        if not week_52.empty:
-            current_snapshot = {
-                'upload_date': 'Current',
-                'data_period': data.get('period_info', ''),
-                'sales': float(week_52.iloc[0, 1]),
-                'sales_growth': float(week_52.iloc[0, 2]) * 100,
-                'units': float(week_52.iloc[0, 3]),
-                'units_growth': float(week_52.iloc[0, 4]) * 100,
-                'retailer_count': len(data['retailers'])
-            }
-            hist_df = pd.concat([hist_df, pd.DataFrame([current_snapshot])], ignore_index=True)
-
         # Sales Trend
         st.markdown("### 📈 Sales Trend Over Time")
 
