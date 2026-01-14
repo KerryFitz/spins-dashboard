@@ -40,1337 +40,798 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Data loading functions
+# PowerTabs Data Loading Functions
 @st.cache_data
-def load_brand_data(file_source=None):
-    """Load the brand and retailers data"""
-    if file_source is not None:
-        df = pd.read_excel(file_source, sheet_name='Raw')
+def load_powertabs_data(file_source=None):
+    """Load all sheets from SPINS PowerTabs file"""
+
+    if file_source is None:
+        file_path = 'SPINS PowerTabs - Entire Report.xlsx'
     else:
-        df = pd.read_excel('SPINs Brand and Retailers_110225.xlsx', sheet_name='Raw')
+        file_path = file_source
 
-    # Clean percentage columns - convert to numeric
-    pct_cols = [col for col in df.columns if '% Chg' in col or '% ACV' in col]
-    for col in pct_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+    data = {}
 
-    # Clean ARP columns
-    arp_cols = [col for col in df.columns if 'ARP' in col]
-    for col in arp_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+    try:
+        # Overview - Key metrics by time period
+        df_overview = pd.read_excel(file_path, sheet_name='Overview', header=None)
+        # Extract the data starting from row 2 (0-indexed)
+        overview_data = df_overview.iloc[2:].copy()
+        overview_data.columns = df_overview.iloc[2].values
+        overview_data = overview_data.iloc[1:].reset_index(drop=True)
+        data['overview'] = overview_data
 
-    return df
+        # Brand by Retailer
+        df_retailers = pd.read_excel(file_path, sheet_name='Brand by Retailer', header=None)
+        retailers_data = df_retailers.iloc[2:].copy()
+        retailers_data.columns = df_retailers.iloc[2].values
+        retailers_data = retailers_data.iloc[1:].reset_index(drop=True)
+        # Clean numeric columns
+        for col in ['Sales', 'Absolute Chg', '% Chg']:
+            if col in retailers_data.columns:
+                retailers_data[col] = pd.to_numeric(retailers_data[col], errors='coerce')
+        data['retailers'] = retailers_data
 
-@st.cache_data
-def load_trend_data(file_source=None):
-    """Load the Humble trend data"""
-    if file_source is not None:
-        df = pd.read_excel(file_source, sheet_name='Raw')
-    else:
-        df = pd.read_excel('SPINs Humble_Trended Sale_100525.xlsx', sheet_name='Raw')
+        # Retailer Growth - Detailed metrics
+        df_retailer_growth = pd.read_excel(file_path, sheet_name='Retailer Growth', header=None)
+        retailer_growth_data = df_retailer_growth.iloc[2:].copy()
+        retailer_growth_data.columns = df_retailer_growth.iloc[2].values
+        retailer_growth_data = retailer_growth_data.iloc[1:].reset_index(drop=True)
+        # Clean numeric columns
+        numeric_cols = [col for col in retailer_growth_data.columns if col not in ['Top 10 Retailers by Dollar Change', 'Primary Driver of Growth']]
+        for col in numeric_cols:
+            retailer_growth_data[col] = pd.to_numeric(retailer_growth_data[col], errors='coerce')
+        data['retailer_growth'] = retailer_growth_data
 
-    # Clean percentage columns
-    pct_cols = [col for col in df.columns if '% Chg' in col or '% ACV' in col]
-    for col in pct_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+        # Growth Drivers
+        df_growth = pd.read_excel(file_path, sheet_name='Growth Drivers', header=None)
+        growth_data = df_growth.iloc[2:].copy()
+        growth_data.columns = df_growth.iloc[2].values
+        growth_data = growth_data.iloc[1:].reset_index(drop=True)
+        for col in growth_data.columns:
+            if col != 'Driver':
+                growth_data[col] = pd.to_numeric(growth_data[col], errors='coerce')
+        data['growth_drivers'] = growth_data
 
-    # Convert TIME FRAME to datetime for sorting
-    df['Date'] = pd.to_datetime(df['TIME FRAME'].str.extract(r'(\d{2}/\d{2}/\d{4})')[0], format='%m/%d/%Y')
-    df = df.sort_values('Date')
+        # Promo Summary
+        try:
+            df_promo = pd.read_excel(file_path, sheet_name='Promo Summary', header=None)
+            promo_data = df_promo.iloc[2:].copy()
+            promo_data.columns = df_promo.iloc[2].values
+            promo_data = promo_data.iloc[1:].reset_index(drop=True)
+            for col in promo_data.columns:
+                if col != 'Promo Type':
+                    promo_data[col] = pd.to_numeric(promo_data[col], errors='coerce')
+            data['promo'] = promo_data
+        except:
+            data['promo'] = pd.DataFrame()
 
-    return df
+        # Brand vs Category
+        try:
+            df_category = pd.read_excel(file_path, sheet_name='Brand vs. Category', header=None)
+            category_data = df_category.iloc[2:].copy()
+            category_data.columns = df_category.iloc[2].values
+            category_data = category_data.iloc[1:].reset_index(drop=True)
+            data['category'] = category_data
+        except:
+            data['category'] = pd.DataFrame()
 
-# Initialize session state for uploaded files
-if 'uploaded_brand_file' not in st.session_state:
-    st.session_state.uploaded_brand_file = None
-if 'uploaded_trend_file' not in st.session_state:
-    st.session_state.uploaded_trend_file = None
+        # Extract period info from first row
+        period_info = df_overview.iloc[0, 0] if not df_overview.empty else ""
+        data['period_info'] = period_info
 
-# Sidebar - Always show this first
+        return data
+
+    except Exception as e:
+        st.error(f"Error loading PowerTabs data: {e}")
+        return None
+
+# Initialize session state
+if 'uploaded_powertabs_file' not in st.session_state:
+    st.session_state.uploaded_powertabs_file = None
+
+# Sidebar - Always show first
 st.sidebar.title("📊 Dashboard Controls")
 st.sidebar.markdown("---")
 
 # File Upload Section - Always visible
-with st.sidebar.expander("📁 Upload Data Files", expanded=True):
-        st.markdown("Upload new weekly SPINS data to update the dashboard")
+with st.sidebar.expander("📁 Upload SPINS PowerTabs File", expanded=True):
+    st.markdown("Upload your SPINS PowerTabs Excel file to analyze data")
 
-        brand_file = st.file_uploader(
-            "Brand & Retailers File",
-            type=['xlsx'],
-            key='brand_uploader',
-            help="Upload the SPINS Brand and Retailers Excel file"
-        )
+    powertabs_file = st.file_uploader(
+        "SPINS PowerTabs File",
+        type=['xlsx'],
+        key='powertabs_uploader',
+        help="Upload the SPINS PowerTabs - Entire Report.xlsx file"
+    )
 
-        trend_file = st.file_uploader(
-            "Trend Data File",
-            type=['xlsx'],
-            key='trend_uploader',
-            help="Upload the SPINS Humble Trended Sale Excel file"
-        )
+    col1, col2 = st.columns(2)
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button("Load Files", type="primary"):
-                if brand_file:
-                    st.session_state.uploaded_brand_file = brand_file
-                    load_brand_data.clear()
-                    st.success("✓ Brand data loaded")
-                if trend_file:
-                    st.session_state.uploaded_trend_file = trend_file
-                    load_trend_data.clear()
-                    st.success("✓ Trend data loaded")
-                if brand_file or trend_file:
-                    st.rerun()
-
-        with col2:
-            if st.button("Reset to Default"):
-                st.session_state.uploaded_brand_file = None
-                st.session_state.uploaded_trend_file = None
-                load_brand_data.clear()
-                load_trend_data.clear()
+    with col1:
+        if st.button("Load File", type="primary"):
+            if powertabs_file:
+                st.session_state.uploaded_powertabs_file = powertabs_file
+                load_powertabs_data.clear()
+                st.success("✓ PowerTabs data loaded")
                 st.rerun()
 
-        # Show current data source
-        if st.session_state.uploaded_brand_file or st.session_state.uploaded_trend_file:
-            st.info("📊 Using uploaded data")
-        else:
-            st.info("📂 Waiting for data files...")
+    with col2:
+        if st.button("Reset to Default"):
+            st.session_state.uploaded_powertabs_file = None
+            load_powertabs_data.clear()
+            st.rerun()
+
+    # Show current data source
+    if st.session_state.uploaded_powertabs_file:
+        st.info("📊 Using uploaded data")
+    else:
+        st.info("📂 Waiting for PowerTabs file...")
 
 st.sidebar.markdown("---")
 
 # Load data
-try:
-    brand_df = load_brand_data(st.session_state.uploaded_brand_file)
-    trend_df = load_trend_data(st.session_state.uploaded_trend_file)
-    data_loaded = True
-except Exception as e:
-    data_loaded = False
+data = load_powertabs_data(st.session_state.uploaded_powertabs_file)
+
+if data is None or 'overview' not in data:
     # Show friendly error message in main area
     st.title("📊 SPINS Marketing Intelligence Dashboard")
     st.markdown("---")
-    st.info("👈 **Please upload your SPINS data files using the sidebar to get started!**")
+    st.info("👈 **Please upload your SPINS PowerTabs file using the sidebar to get started!**")
     st.markdown("""
-    ### Required Files:
-    1. **Brand & Retailers File** - SPINs Brand and Retailers Excel file (.xlsx)
-    2. **Trend Data File** - SPINs Humble Trended Sale Excel file (.xlsx)
+    ### Required File:
+    **SPINS PowerTabs - Entire Report.xlsx**
+
+    This file contains all your SPINS market data including:
+    - Brand performance metrics
+    - Retailer sales and growth
+    - Promotional analysis
+    - Growth drivers
 
     ### How to Upload:
-    - Click on "📁 Upload Data Files" in the left sidebar
-    - Select both Excel files
-    - Click "Load Files"
+    1. Click on "📁 Upload SPINS PowerTabs File" in the left sidebar
+    2. Select your PowerTabs Excel file
+    3. Click "Load File"
 
     Your data stays secure and is only stored temporarily for this session.
     """)
     st.stop()
 
 # If data loaded successfully, continue with dashboard
-if data_loaded:
-    # Navigation
-    page = st.sidebar.radio(
-        "Select View",
-        ["💡 Strategic Insights", "🏠 Executive Overview", "📈 Sales Performance", "🏆 Competitive Analysis",
-         "🏪 Retailer Performance", "📉 Trend Analysis", "🎯 Promotional Analysis"]
-    )
+# Navigation
+page = st.sidebar.radio(
+    "Select View",
+    ["💡 Strategic Insights", "🏠 Executive Overview", "🏪 Retailer Performance",
+     "📈 Growth Drivers", "🎯 Promotional Analysis"]
+)
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### Filters")
+st.sidebar.markdown("---")
 
-    # Common filters
-    time_periods = sorted(brand_df['TIME FRAME'].dropna().unique())
-    selected_period = st.sidebar.selectbox("Time Period", time_periods, index=len(time_periods)-1)
+# Show period info
+if 'period_info' in data and data['period_info']:
+    st.sidebar.markdown("### Data Period")
+    period_text = data['period_info']
+    # Extract just the time period part
+    if '|' in period_text:
+        period_parts = period_text.split('|')
+        period = period_parts[0].replace('Period:', '').strip()
+        st.sidebar.info(f"📅 {period}")
 
-    # Filter data based on selection
-    filtered_df = brand_df[brand_df['TIME FRAME'] == selected_period].copy()
+# ====================================================================================
+# STRATEGIC INSIGHTS PAGE
+# ====================================================================================
+if page == "💡 Strategic Insights":
+    st.markdown("<h1 class='main-header'>💡 Strategic Insights</h1>", unsafe_allow_html=True)
+    st.markdown("**AI-powered analysis and actionable recommendations for your marketing strategy**")
+    st.markdown("---")
 
-    # Strategic analysis functions
-    def generate_insights(filtered_df, brand_df, trend_df, selected_period):
-        """Generate strategic insights and recommendations"""
-        insights = {
-            'alerts': [],
-            'opportunities': [],
-            'threats': [],
-            'recommendations': [],
-            'key_metrics': {}
-        }
+    overview = data['overview']
+    retailers = data['retailers']
+    retailer_growth = data['retailer_growth']
+    growth_drivers = data['growth_drivers']
 
-        # Get HUMBLE data
-        humble_data = filtered_df[filtered_df['DESCRIPTION'] == 'HUMBLE']
+    # Get 52-week metrics
+    week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
+    if not week_52.empty:
+        total_sales = float(week_52.iloc[0, 1])
+        sales_growth = float(week_52.iloc[0, 2]) * 100
+        total_units = float(week_52.iloc[0, 3])
+        units_growth = float(week_52.iloc[0, 4]) * 100
+    else:
+        total_sales = 0
+        sales_growth = 0
+        total_units = 0
+        units_growth = 0
 
-        if humble_data.empty:
-            return insights
+    # Executive Summary
+    col1, col2, col3, col4 = st.columns(4)
 
-        # Calculate key metrics
-        total_sales = humble_data['Dollars'].sum()
-        total_units = humble_data['Units'].sum()
-        avg_growth = humble_data['Dollars, % Chg, Yago'].mean()
-        avg_acv = humble_data['Max % ACV'].astype(float).mean()
-        promo_sales = humble_data['Dollars, Promo'].sum()
-        promo_pct = (promo_sales / total_sales * 100) if total_sales > 0 else 0
+    with col1:
+        st.metric(
+            "Total Sales (52W)",
+            f"${total_sales/1e6:.2f}M",
+            f"{sales_growth:+.1f}%"
+        )
 
-        insights['key_metrics'] = {
-            'total_sales': total_sales,
-            'avg_growth': avg_growth * 100,
-            'avg_acv': avg_acv,
-            'promo_pct': promo_pct
-        }
+    with col2:
+        st.metric(
+            "Total Units (52W)",
+            f"{total_units/1e3:.1f}K",
+            f"{units_growth:+.1f}%"
+        )
 
-        # ALERTS - Identify concerning trends
-        if avg_growth < -0.05:
-            insights['alerts'].append({
-                'severity': 'high',
-                'title': 'Declining Sales Trend',
-                'description': f'Sales are down {abs(avg_growth)*100:.1f}% YoY. Immediate action required.',
-                'metric': avg_growth * 100
+    with col3:
+        top_retailer = retailers.iloc[0, 0] if not retailers.empty else "N/A"
+        top_sales = float(retailers.iloc[0, 1]) if not retailers.empty else 0
+        st.metric(
+            "Top Retailer",
+            top_retailer,
+            f"${top_sales/1e6:.2f}M"
+        )
+
+    with col4:
+        num_retailers = len(retailers)
+        st.metric(
+            "Active Retailers",
+            num_retailers,
+            "Channels"
+        )
+
+    st.markdown("---")
+
+    # Critical Alerts
+    st.markdown("### 🚨 Critical Alerts")
+    alerts = []
+
+    # Check for declining sales
+    if sales_growth < 0:
+        alerts.append({
+            'severity': '🔴 HIGH',
+            'title': 'Declining Sales Trend',
+            'description': f'Sales are down {abs(sales_growth):.1f}% YoY. Immediate action required to reverse trend.'
+        })
+
+    # Check for underperforming retailers
+    declining_retailers = retailers[retailers['% Chg'] < 0]
+    if not declining_retailers.empty and len(declining_retailers) > 0:
+        alerts.append({
+            'severity': '🟡 MEDIUM',
+            'title': f'{len(declining_retailers)} Declining Retailers',
+            'description': f'Retailers showing negative growth: {", ".join(declining_retailers.iloc[:, 0].tolist())}'
+        })
+
+    # Check recent performance (4 weeks vs 52 weeks)
+    week_4 = overview[overview.iloc[:, 0] == '4 Weeks']
+    if not week_4.empty:
+        recent_growth = float(week_4.iloc[0, 2]) * 100
+        if recent_growth < sales_growth - 10:
+            alerts.append({
+                'severity': '🟡 MEDIUM',
+                'title': 'Slowing Momentum',
+                'description': f'Recent 4-week growth ({recent_growth:.1f}%) is significantly below 52-week average ({sales_growth:.1f}%).'
             })
 
-        if promo_pct > 50:
-            insights['alerts'].append({
-                'severity': 'medium',
-                'title': 'High Promotional Dependency',
-                'description': f'{promo_pct:.1f}% of sales come from promotions. Risk of margin erosion.',
-                'metric': promo_pct
-            })
+    if alerts:
+        for alert in alerts:
+            st.warning(f"**{alert['severity']} - {alert['title']}**\n\n{alert['description']}")
+    else:
+        st.success("✅ **No critical alerts** - Performance is on track")
 
-        # Check for distribution losses
-        declining_acv = humble_data[humble_data['Max % ACV, +/- Chg, Yago'] < -5]
-        if not declining_acv.empty:
-            for _, row in declining_acv.iterrows():
-                insights['alerts'].append({
-                    'severity': 'high',
-                    'title': f'Distribution Loss at {row["GEOGRAPHY"]}',
-                    'description': f'ACV dropped by {abs(row["Max % ACV, +/- Chg, Yago"]):.1f} points.',
-                    'metric': row['Max % ACV, +/- Chg, Yago']
-                })
+    st.markdown("---")
 
-        # OPPORTUNITIES - Identify growth opportunities
-        high_growth_retailers = humble_data[humble_data['Dollars, % Chg, Yago'] > 0.15].sort_values('Dollars, % Chg, Yago', ascending=False)
-        for _, row in high_growth_retailers.head(3).iterrows():
-            insights['opportunities'].append({
-                'title': f'Strong Growth at {row["GEOGRAPHY"]}',
-                'description': f'Sales up {row["Dollars, % Chg, Yago"]*100:.1f}% YoY. Consider increasing investment.',
-                'metric': row['Dollars, % Chg, Yago'] * 100,
-                'action': f'Expand distribution or promotional support at {row["GEOGRAPHY"]}'
-            })
+    # Growth Opportunities
+    st.markdown("### 🚀 Growth Opportunities")
 
-        # Low ACV but high sales velocity = opportunity
-        for _, row in humble_data.iterrows():
-            acv = pd.to_numeric(row['Max % ACV'], errors='coerce')
-            if pd.notna(acv) and acv < 50 and row['Dollars'] > humble_data['Dollars'].median():
-                velocity = row['Units'] / row['# of Stores Selling'] if row['# of Stores Selling'] > 0 else 0
-                if velocity > humble_data['Units'].sum() / humble_data['# of Stores Selling'].sum():
-                    insights['opportunities'].append({
-                        'title': f'Distribution Gap at {row["GEOGRAPHY"]}',
-                        'description': f'Strong velocity ({velocity:.1f} units/store) but only {acv:.1f}% ACV.',
-                        'metric': acv,
-                        'action': f'Negotiate expanded distribution at {row["GEOGRAPHY"]}'
-                    })
+    col1, col2 = st.columns(2)
 
-        # THREATS - Competitive analysis
-        for geo in humble_data['GEOGRAPHY'].unique():
-            geo_data = filtered_df[filtered_df['GEOGRAPHY'] == geo]
-            humble_sales = geo_data[geo_data['DESCRIPTION'] == 'HUMBLE']['Dollars'].sum()
+    with col1:
+        st.markdown("#### Top Performing Retailers")
+        # Top 3 retailers by growth rate
+        top_growth_retailers = retailers.nlargest(3, '% Chg')
+        for idx, row in top_growth_retailers.iterrows():
+            retailer_name = row.iloc[0]
+            growth_pct = row['% Chg'] * 100
+            sales = row['Sales']
+            st.success(f"**{retailer_name}**: +{growth_pct:.1f}% (${sales/1e6:.2f}M)")
+            st.caption("💡 Consider increased marketing investment and promotional support")
 
-            # Find competitors with higher growth
-            competitors = geo_data[geo_data['DESCRIPTION'] != 'HUMBLE'].copy()
-            if not competitors.empty:
-                top_competitors = competitors.nlargest(5, 'Dollars')
-                growing_competitors = top_competitors[top_competitors['Dollars, % Chg, Yago'] > avg_growth + 0.10]
+    with col2:
+        st.markdown("#### Growth Drivers to Leverage")
+        if not growth_drivers.empty:
+            for idx, row in growth_drivers.iterrows():
+                driver = row.iloc[0]
+                chg = row.iloc[3]
+                dollars_impact = row.iloc[4]
+                if dollars_impact > 0:
+                    st.info(f"**{driver}**: +{chg:.1f} → ${dollars_impact/1e3:.0f}K impact")
+        else:
+            st.info("Growth driver data not available")
 
-                for _, comp in growing_competitors.iterrows():
-                    if comp['Dollars'] > humble_sales * 0.5:  # Significant competitor
-                        insights['threats'].append({
-                            'title': f'{comp["DESCRIPTION"]} Gaining Share',
-                            'description': f'Growing {comp["Dollars, % Chg, Yago"]*100:.1f}% YoY at {geo}, faster than HUMBLE.',
-                            'metric': comp['Dollars, % Chg, Yago'] * 100,
-                            'competitor': comp['DESCRIPTION']
-                        })
+    st.markdown("---")
 
-        # RECOMMENDATIONS
-        # 1. Retailer prioritization
-        retailer_scores = []
-        for _, row in humble_data.iterrows():
-            score = 0
-            growth = row['Dollars, % Chg, Yago'] if pd.notna(row['Dollars, % Chg, Yago']) else 0
-            sales = row['Dollars']
+    # Strategic Recommendations
+    st.markdown("### 🎯 Strategic Recommendations")
 
-            # Score based on sales and growth
-            if growth > 0.10:
-                score += 3
-            elif growth > 0:
-                score += 1
-            elif growth < -0.10:
-                score -= 2
+    recommendations = []
 
-            if sales > humble_data['Dollars'].quantile(0.75):
-                score += 2
+    # Recommendation 1: Focus on top performers
+    if not retailers.empty:
+        top_3_sales = retailers.nlargest(3, 'Sales')
+        top_3_names = ", ".join(top_3_sales.iloc[:, 0].tolist())
+        top_3_total = top_3_sales['Sales'].sum()
+        top_3_pct = (top_3_total / total_sales) * 100
 
-            retailer_scores.append({
-                'retailer': row['GEOGRAPHY'],
-                'score': score,
-                'sales': sales,
-                'growth': growth * 100
-            })
+        recommendations.append({
+            'priority': '🟢 HIGH',
+            'title': f'Double Down on Top Retailers',
+            'action': f'Focus 70% of marketing resources on {top_3_names}',
+            'rationale': f'These 3 retailers represent {top_3_pct:.1f}% of sales and show strong growth momentum.',
+            'next_steps': [
+                'Schedule quarterly business reviews with key buyers',
+                'Develop co-marketing campaigns',
+                'Ensure optimal shelf placement and inventory levels'
+            ]
+        })
 
-        retailer_scores = sorted(retailer_scores, key=lambda x: x['score'], reverse=True)
+    # Recommendation 2: Address growth drivers
+    if not growth_drivers.empty:
+        top_driver = growth_drivers.nlargest(1, 'Dollars Chg Due To').iloc[0]
+        driver_name = top_driver.iloc[0]
+        driver_impact = top_driver.iloc[4]
 
-        # Top priority retailers
-        if retailer_scores:
-            top_3 = retailer_scores[:3]
-            insights['recommendations'].append({
-                'category': 'Retailer Focus',
-                'priority': 'high',
-                'title': 'Prioritize High-Performance Retailers',
-                'actions': [f"{r['retailer']}: ${r['sales']:,.0f} sales, {r['growth']:.1f}% growth" for r in top_3],
-                'rationale': 'These retailers show strong performance and growth momentum.'
-            })
+        recommendations.append({
+            'priority': '🟢 HIGH',
+            'title': f'Accelerate {driver_name} Strategy',
+            'action': f'Invest in expanding {driver_name.lower()}',
+            'rationale': f'{driver_name} drove ${driver_impact/1e3:.0f}K in incremental sales.',
+            'next_steps': [
+                f'Analyze which retailers have room to improve {driver_name.lower()}',
+                'Create incentive programs for underperforming locations',
+                'Set quarterly targets for improvement'
+            ]
+        })
 
-        # Declining retailers need attention
-        declining = [r for r in retailer_scores if r['growth'] < -5]
-        if declining:
-            insights['recommendations'].append({
-                'category': 'Retailer Risk',
-                'priority': 'high',
-                'title': 'Address Declining Retailers',
-                'actions': [f"{r['retailer']}: {r['growth']:.1f}% decline" for r in declining[:3]],
-                'rationale': 'Immediate intervention needed to reverse negative trends.'
-            })
+    # Recommendation 3: Rescue declining retailers
+    if not declining_retailers.empty and len(declining_retailers) > 0:
+        worst_performer = declining_retailers.iloc[0]
+        worst_name = worst_performer.iloc[0]
+        worst_decline = worst_performer['% Chg'] * 100
 
-        # 2. Promotional strategy
-        if promo_pct > 40:
-            insights['recommendations'].append({
-                'category': 'Promotional Strategy',
-                'priority': 'medium',
-                'title': 'Reduce Promotional Dependency',
-                'actions': [
-                    f'Current promo mix: {promo_pct:.1f}% (Target: 25-35%)',
-                    'Improve everyday shelf presence and visibility',
-                    'Test premium positioning at select retailers'
-                ],
-                'rationale': 'High promotional dependency erodes margins and brand equity.'
-            })
-        elif promo_pct < 20:
-            insights['recommendations'].append({
-                'category': 'Promotional Strategy',
-                'priority': 'low',
-                'title': 'Consider Increased Promotional Activity',
-                'actions': [
-                    f'Current promo mix: {promo_pct:.1f}%',
-                    'Test targeted promotions at underperforming retailers',
-                    'Trial sampling programs to drive awareness'
-                ],
-                'rationale': 'Limited promotional activity may be leaving sales on the table.'
-            })
+        recommendations.append({
+            'priority': '🟡 MEDIUM',
+            'title': 'Turn Around Declining Retailers',
+            'action': f'Create recovery plan for {worst_name} and similar accounts',
+            'rationale': f'{worst_name} is down {abs(worst_decline):.1f}%. Early intervention can prevent further losses.',
+            'next_steps': [
+                'Conduct account diagnostic (distribution, pricing, promo, placement)',
+                'Compare vs successful retailers to identify gaps',
+                'Implement 90-day action plan with weekly check-ins'
+            ]
+        })
 
-        # 3. Distribution expansion
-        low_acv_retailers = humble_data[humble_data['Max % ACV'].astype(float) < 50]
-        if not low_acv_retailers.empty:
-            insights['recommendations'].append({
-                'category': 'Distribution',
-                'priority': 'medium',
-                'title': 'Expand Distribution Coverage',
-                'actions': [f"{row['GEOGRAPHY']}: {pd.to_numeric(row['Max % ACV'], errors='coerce'):.1f}% ACV"
-                           for _, row in low_acv_retailers.head(3).iterrows()],
-                'rationale': 'Low ACV indicates significant white space opportunity.'
-            })
+    for rec in recommendations:
+        with st.expander(f"{rec['priority']} - {rec['title']}", expanded=True):
+            st.markdown(f"**Recommended Action:** {rec['action']}")
+            st.markdown(f"**Rationale:** {rec['rationale']}")
+            st.markdown("**Next Steps:**")
+            for step in rec['next_steps']:
+                st.markdown(f"- {step}")
 
-        return insights
+    st.markdown("---")
 
-    # Main content
-    if page == "💡 Strategic Insights":
-        st.markdown('<p class="main-header">Strategic Insights & Recommendations</p>', unsafe_allow_html=True)
-        st.markdown(f"**Period:** {selected_period}")
-        st.markdown("*AI-powered analysis of your SPINS data*")
-        st.markdown("---")
+    # This Week's Action Plan
+    st.markdown("### 📋 This Week's Action Plan")
 
-        # Generate insights
-        insights = generate_insights(filtered_df, brand_df, trend_df, selected_period)
+    col1, col2 = st.columns(2)
 
-        # Executive Summary
-        st.subheader("📊 Executive Summary")
+    with col1:
+        st.markdown("#### Immediate Actions")
+        st.markdown("- [ ] Review top 3 retailer performance with sales team")
+        st.markdown("- [ ] Schedule calls with declining retailers")
+        st.markdown("- [ ] Analyze promotional effectiveness by account")
+        st.markdown("- [ ] Update sales forecasts based on latest trends")
 
-        col1, col2, col3, col4 = st.columns(4)
+    with col2:
+        st.markdown("#### Key Metrics to Monitor")
+        st.markdown(f"- **Weekly Sales**: Track against ${total_sales/52/1e3:.0f}K weekly average")
+        st.markdown(f"- **Growth Rate**: Maintain above {sales_growth:.1f}% YoY")
+        st.markdown("- **Distribution**: Monitor ACV and store count")
+        st.markdown("- **Promotional Lift**: Measure ROI on promotions")
+
+# ====================================================================================
+# EXECUTIVE OVERVIEW PAGE
+# ====================================================================================
+elif page == "🏠 Executive Overview":
+    st.markdown("<h1 class='main-header'>🏠 Executive Overview</h1>", unsafe_allow_html=True)
+    st.markdown("**High-level performance metrics and trends**")
+    st.markdown("---")
+
+    overview = data['overview']
+
+    # Performance by Time Period
+    st.markdown("### 📊 Performance by Time Period")
+
+    if not overview.empty:
+        # Create metrics display
+        fig = go.Figure()
+
+        # Add sales bars
+        fig.add_trace(go.Bar(
+            name='Sales ($)',
+            x=overview.iloc[:, 0],
+            y=overview.iloc[:, 1],
+            text=[f"${val/1e6:.2f}M" for val in overview.iloc[:, 1]],
+            textposition='auto',
+            marker_color='#1f77b4'
+        ))
+
+        fig.update_layout(
+            title="Sales by Time Period",
+            xaxis_title="Time Period",
+            yaxis_title="Sales ($)",
+            height=400,
+            showlegend=False
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Growth rates
+        col1, col2 = st.columns(2)
 
         with col1:
-            sales = insights['key_metrics'].get('total_sales', 0)
-            st.metric("Total Sales", f"${sales:,.0f}")
+            fig_dollars = go.Figure()
+            fig_dollars.add_trace(go.Bar(
+                x=overview.iloc[:, 0],
+                y=overview.iloc[:, 2] * 100,
+                text=[f"{val*100:+.1f}%" for val in overview.iloc[:, 2]],
+                textposition='auto',
+                marker_color=['#28a745' if x > 0 else '#dc3545' for x in overview.iloc[:, 2]]
+            ))
+            fig_dollars.update_layout(
+                title="Dollar Growth % by Period",
+                xaxis_title="Time Period",
+                yaxis_title="Growth %",
+                height=350
+            )
+            st.plotly_chart(fig_dollars, use_container_width=True)
 
         with col2:
-            growth = insights['key_metrics'].get('avg_growth', 0)
-            st.metric("Avg YoY Growth", f"{growth:.1f}%",
-                     delta=f"{growth:.1f}%",
-                     delta_color="normal")
+            fig_units = go.Figure()
+            fig_units.add_trace(go.Bar(
+                x=overview.iloc[:, 0],
+                y=overview.iloc[:, 4] * 100,
+                text=[f"{val*100:+.1f}%" for val in overview.iloc[:, 4]],
+                textposition='auto',
+                marker_color=['#28a745' if x > 0 else '#dc3545' for x in overview.iloc[:, 4]]
+            ))
+            fig_units.update_layout(
+                title="Unit Growth % by Period",
+                xaxis_title="Time Period",
+                yaxis_title="Growth %",
+                height=350
+            )
+            st.plotly_chart(fig_units, use_container_width=True)
 
-        with col3:
-            acv = insights['key_metrics'].get('avg_acv', 0)
-            st.metric("Avg Distribution", f"{acv:.1f}%")
+        # Data table
+        st.markdown("### 📋 Detailed Metrics")
+        display_df = overview.copy()
+        display_df.columns = ['Time Period', 'Dollars', 'Dollars % Chg', 'Units', 'Units % Chg']
+        display_df['Dollars'] = display_df['Dollars'].apply(lambda x: f"${x:,.0f}")
+        display_df['Dollars % Chg'] = display_df['Dollars % Chg'].apply(lambda x: f"{x*100:+.1f}%")
+        display_df['Units'] = display_df['Units'].apply(lambda x: f"{x:,.0f}")
+        display_df['Units % Chg'] = display_df['Units % Chg'].apply(lambda x: f"{x*100:+.1f}%")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        with col4:
-            promo = insights['key_metrics'].get('promo_pct', 0)
-            color = "inverse" if promo > 40 else "normal"
-            st.metric("Promo Mix", f"{promo:.1f}%", delta_color=color)
+# ====================================================================================
+# RETAILER PERFORMANCE PAGE
+# ====================================================================================
+elif page == "🏪 Retailer Performance":
+    st.markdown("<h1 class='main-header'>🏪 Retailer Performance</h1>", unsafe_allow_html=True)
+    st.markdown("**Detailed analysis of performance by retailer**")
+    st.markdown("---")
 
-        st.markdown("---")
+    retailers = data['retailers']
+    retailer_growth = data['retailer_growth']
 
-        # Alerts Section
-        if insights['alerts']:
-            st.subheader("🚨 Critical Alerts")
-            st.markdown("*Immediate attention required*")
+    # Top performers
+    st.markdown("### 🏆 Top Performers")
 
-            for alert in insights['alerts']:
-                severity_color = {
-                    'high': '🔴',
-                    'medium': '🟡',
-                    'low': '🟢'
-                }.get(alert['severity'], '⚪')
+    col1, col2 = st.columns(2)
 
-                with st.container():
-                    cols = st.columns([1, 20])
-                    with cols[0]:
-                        st.markdown(f"### {severity_color}")
-                    with cols[1]:
-                        st.markdown(f"**{alert['title']}**")
-                        st.markdown(alert['description'])
-                    st.markdown("")
+    with col1:
+        # Sales chart
+        fig_sales = px.bar(
+            retailers.head(10),
+            x='Sales',
+            y=retailers.columns[0],
+            orientation='h',
+            title="Top 10 Retailers by Sales",
+            text='Sales'
+        )
+        fig_sales.update_traces(texttemplate='$%{text:.2s}', textposition='outside')
+        fig_sales.update_layout(height=500, yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_sales, use_container_width=True)
+
+    with col2:
+        # Growth chart
+        fig_growth = px.bar(
+            retailers.head(10),
+            x=retailers.columns[0],
+            y='% Chg',
+            title="Growth Rate by Retailer",
+            text='% Chg',
+            color='% Chg',
+            color_continuous_scale=['red', 'yellow', 'green']
+        )
+        fig_growth.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+        fig_growth.update_layout(height=500, xaxis_tickangle=-45)
+        st.plotly_chart(fig_growth, use_container_width=True)
+
+    # Performance Scorecard with weighted scoring
+    st.markdown("### 📊 Retailer Performance Scorecard")
+    st.markdown("**Scoring:** 70% Sales Volume + 30% Growth Rate")
+
+    scorecard = retailers.copy()
+
+    # Calculate Performance Score (70% volume, 30% growth)
+    max_sales = scorecard['Sales'].max()
+    scorecard['Sales Score'] = (scorecard['Sales'] / max_sales * 100) if max_sales > 0 else 0
+
+    # Growth score: cap at +50% and -50% for scoring purposes
+    scorecard['Growth Score'] = scorecard['% Chg'].clip(-0.5, 0.5) * 100
+    scorecard['Growth Score'] = ((scorecard['Growth Score'] + 50) / 100 * 100)
+
+    # Combined Performance Score (70% sales, 30% growth)
+    scorecard['Performance Score'] = (scorecard['Sales Score'] * 0.7 + scorecard['Growth Score'] * 0.3)
+
+    # Priority tiers
+    def get_priority(score):
+        if score >= 70:
+            return '🟢 High Priority'
+        elif score >= 40:
+            return '🟡 Medium Priority'
         else:
-            st.success("✅ No critical alerts. Performance is within acceptable ranges.")
+            return '🔴 Low Priority'
 
+    scorecard['Priority'] = scorecard['Performance Score'].apply(get_priority)
+
+    # Display scorecard
+    display_scorecard = scorecard[[scorecard.columns[0], 'Sales', '% Chg', 'Performance Score', 'Priority']].copy()
+    display_scorecard.columns = ['Retailer', 'Sales', 'Growth %', 'Performance Score', 'Priority']
+    display_scorecard['Sales'] = display_scorecard['Sales'].apply(lambda x: f"${x/1e6:.2f}M")
+    display_scorecard['Growth %'] = display_scorecard['Growth %'].apply(lambda x: f"{x*100:+.1f}%")
+    display_scorecard['Performance Score'] = display_scorecard['Performance Score'].apply(lambda x: f"{x:.1f}")
+
+    st.dataframe(display_scorecard, use_container_width=True, hide_index=True)
+
+    # Detailed retailer metrics
+    if not retailer_growth.empty:
         st.markdown("---")
+        st.markdown("### 🔍 Detailed Retailer Metrics")
 
-        # Opportunities Section
-        if insights['opportunities']:
-            st.subheader("🎯 Growth Opportunities")
-            st.markdown("*Areas where you can accelerate growth*")
+        # Select retailer
+        retailer_list = retailer_growth.iloc[:, 0].tolist()
+        selected_retailer = st.selectbox("Select Retailer for Details", retailer_list)
 
-            for opp in insights['opportunities'][:5]:  # Top 5 opportunities
-                with st.expander(f"✨ {opp['title']}", expanded=True):
-                    st.markdown(opp['description'])
-                    if 'action' in opp:
-                        st.markdown(f"**Recommended Action:** {opp['action']}")
+        retailer_data = retailer_growth[retailer_growth.iloc[:, 0] == selected_retailer]
 
+        if not retailer_data.empty:
+            row = retailer_data.iloc[0]
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Dollar Share", f"{row['Dollar Share']:.1%}" if 'Dollar Share' in row else "N/A")
+            with col2:
+                st.metric("TDP", f"{row['TDP']:.0f}" if 'TDP' in row else "N/A")
+            with col3:
+                st.metric("Max % ACV", f"{row['Max % ACV']:.0f}%" if 'Max % ACV' in row else "N/A")
+            with col4:
+                st.metric("Avg # Items", f"{row['Avg # Items']:.1f}" if 'Avg # Items' in row else "N/A")
+
+            st.markdown("#### Primary Growth Driver")
+            if 'Primary Driver of Growth' in row:
+                st.info(f"**{row['Primary Driver of Growth']}**")
+
+# ====================================================================================
+# GROWTH DRIVERS PAGE
+# ====================================================================================
+elif page == "📈 Growth Drivers":
+    st.markdown("<h1 class='main-header'>📈 Growth Drivers</h1>", unsafe_allow_html=True)
+    st.markdown("**Understanding what's driving your business growth**")
+    st.markdown("---")
+
+    growth_drivers = data['growth_drivers']
+
+    if not growth_drivers.empty:
+        # Waterfall chart of growth drivers
+        st.markdown("### 💧 Growth Driver Waterfall")
+
+        drivers = growth_drivers.iloc[:, 0].tolist()
+        impacts = growth_drivers.iloc[:, 4].tolist()
+
+        # Create waterfall
+        fig = go.Figure(go.Waterfall(
+            name="Growth Impact",
+            orientation="v",
+            measure=["relative"] * len(drivers),
+            x=drivers,
+            textposition="outside",
+            text=[f"${val/1e3:.0f}K" for val in impacts],
+            y=impacts,
+            connector={"line": {"color": "rgb(63, 63, 63)"}},
+            increasing={"marker": {"color": "#28a745"}},
+            decreasing={"marker": {"color": "#dc3545"}},
+        ))
+
+        fig.update_layout(
+            title="Dollar Impact by Growth Driver",
+            showlegend=False,
+            height=500
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Driver details
+        st.markdown("### 📊 Driver Details")
+
+        cols = st.columns(len(growth_drivers))
+
+        for idx, (col, (_, row)) in enumerate(zip(cols, growth_drivers.iterrows())):
+            with col:
+                driver = row.iloc[0]
+                yag = row.iloc[1]
+                latest = row.iloc[2]
+                chg = row.iloc[3]
+                impact = row.iloc[4]
+
+                st.markdown(f"#### {driver}")
+                st.metric("Latest", f"{latest:.1f}", f"{chg:+.1f}")
+                st.metric("YAG", f"{yag:.1f}")
+                st.metric("$ Impact", f"${impact/1e3:.0f}K")
+
+        # Recommendations
         st.markdown("---")
+        st.markdown("### 💡 Recommendations")
 
-        # Threats Section
-        if insights['threats']:
-            st.subheader("⚠️ Competitive Threats")
-            st.markdown("*Monitor these competitive dynamics*")
-
-            threat_list = []
-            for threat in insights['threats'][:5]:
-                threat_list.append({
-                    'Competitor': threat.get('competitor', 'N/A'),
-                    'Issue': threat['title'],
-                    'Description': threat['description'],
-                    'Growth Rate': f"{threat['metric']:.1f}%"
-                })
-
-            if threat_list:
-                threat_df = pd.DataFrame(threat_list)
-                st.dataframe(threat_df, width='stretch', hide_index=True)
-
-        st.markdown("---")
-
-        # Strategic Recommendations
-        st.subheader("💡 Strategic Recommendations")
-        st.markdown("*Prioritized action plan based on data analysis*")
-
-        if insights['recommendations']:
-            # Group by priority
-            high_priority = [r for r in insights['recommendations'] if r['priority'] == 'high']
-            medium_priority = [r for r in insights['recommendations'] if r['priority'] == 'medium']
-            low_priority = [r for r in insights['recommendations'] if r['priority'] == 'low']
-
-            if high_priority:
-                st.markdown("### 🔴 High Priority")
-                for rec in high_priority:
-                    with st.expander(f"**{rec['title']}** - {rec['category']}", expanded=True):
-                        st.markdown(f"*{rec['rationale']}*")
-                        st.markdown("**Actions:**")
-                        for action in rec['actions']:
-                            st.markdown(f"• {action}")
-
-            if medium_priority:
-                st.markdown("### 🟡 Medium Priority")
-                for rec in medium_priority:
-                    with st.expander(f"**{rec['title']}** - {rec['category']}"):
-                        st.markdown(f"*{rec['rationale']}*")
-                        st.markdown("**Actions:**")
-                        for action in rec['actions']:
-                            st.markdown(f"• {action}")
-
-            if low_priority:
-                st.markdown("### 🟢 Low Priority")
-                for rec in low_priority:
-                    with st.expander(f"**{rec['title']}** - {rec['category']}"):
-                        st.markdown(f"*{rec['rationale']}*")
-                        st.markdown("**Actions:**")
-                        for action in rec['actions']:
-                            st.markdown(f"• {action}")
-
-        # Key Metrics to Watch
-        st.markdown("---")
-        st.subheader("📈 Key Metrics to Monitor")
+        # Find top positive and negative drivers
+        top_driver = growth_drivers.nlargest(1, 'Dollars Chg Due To').iloc[0]
+        worst_driver = growth_drivers.nsmallest(1, 'Dollars Chg Due To').iloc[0]
 
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("**Week-over-Week:**")
-            st.markdown("• Total sales trend")
-            st.markdown("• YoY growth rate")
-            st.markdown("• Average transaction value")
-            st.markdown("• Promotional effectiveness")
+            st.success(f"""
+            **Leverage: {top_driver.iloc[0]}**
+
+            This driver contributed ${top_driver.iloc[4]/1e3:.0f}K in growth.
+
+            **Action:** Double down on this strength. Analyze which retailers have the highest {top_driver.iloc[0].lower()}
+            and replicate their success across other accounts.
+            """)
 
         with col2:
-            st.markdown("**Month-over-Month:**")
-            st.markdown("• Distribution (ACV) changes")
-            st.markdown("• Market share vs competitors")
-            st.markdown("• Retailer mix shifts")
-            st.markdown("• Velocity (units per store)")
+            if worst_driver.iloc[4] < 0:
+                st.warning(f"""
+                **Fix: {worst_driver.iloc[0]}**
 
-        # Trend Analysis from historical data
-        st.markdown("---")
-        st.subheader("📉 Performance Trends")
+                This driver reduced growth by ${abs(worst_driver.iloc[4])/1e3:.0f}K.
 
-        # Get trend data for HUMBLE
-        natural_trend = trend_df[trend_df['GEOGRAPHY'] == 'TOTAL US - NATURAL EXPANDED CHANNEL'].copy()
-
-        if not natural_trend.empty and len(natural_trend) >= 12:
-            # Calculate trend indicators
-            recent_sales = natural_trend.tail(12)['Dollars'].mean()
-            prior_sales = natural_trend.head(12)['Dollars'].mean()
-            trend_direction = ((recent_sales - prior_sales) / prior_sales * 100) if prior_sales > 0 else 0
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                if trend_direction > 10:
-                    st.success(f"📈 **Accelerating Growth**: Sales trending up {trend_direction:.1f}% over time")
-                elif trend_direction > 0:
-                    st.info(f"➡️ **Stable Growth**: Sales trending up {trend_direction:.1f}% over time")
-                elif trend_direction > -10:
-                    st.warning(f"⚠️ **Slowing Growth**: Sales trending down {abs(trend_direction):.1f}% over time")
-                else:
-                    st.error(f"📉 **Declining**: Sales trending down {abs(trend_direction):.1f}% over time")
-
-            with col2:
-                # Calculate volatility
-                sales_std = natural_trend['Dollars'].std()
-                sales_mean = natural_trend['Dollars'].mean()
-                volatility = (sales_std / sales_mean * 100) if sales_mean > 0 else 0
-
-                if volatility < 10:
-                    st.success(f"✅ **Stable Performance**: Low volatility ({volatility:.1f}%)")
-                elif volatility < 20:
-                    st.info(f"ℹ️ **Moderate Volatility**: {volatility:.1f}%")
-                else:
-                    st.warning(f"⚠️ **High Volatility**: {volatility:.1f}% - Review consistency")
-
-        # Action Plan Summary
-        st.markdown("---")
-        st.subheader("📋 This Week's Action Plan")
-
-        st.markdown("""
-        **Immediate Actions (Next 7 Days):**
-        1. Review and address any high-priority alerts above
-        2. Contact account managers for declining retailers
-        3. Analyze top growth retailers for expansion opportunities
-
-        **This Month:**
-        1. Implement recommendations from medium-priority section
-        2. Review promotional calendar against performance data
-        3. Assess competitive positioning in key markets
-
-        **Strategic Planning:**
-        1. Evaluate distribution gaps and expansion opportunities
-        2. Review pricing strategy vs. competition
-        3. Plan promotional strategy for next quarter based on ROI analysis
-        """)
-
-    elif page == "🏠 Executive Overview":
-        st.markdown('<p class="main-header">Executive Overview</p>', unsafe_allow_html=True)
-        st.markdown(f"**Period:** {selected_period}")
-        st.markdown("---")
-
-        # Get Humble data
-        humble_data = filtered_df[filtered_df['DESCRIPTION'] == 'HUMBLE']
-
-        if not humble_data.empty:
-            # Calculate totals across all retailers
-            total_sales = humble_data['Dollars'].sum()
-            total_units = humble_data['Units'].sum()
-            avg_growth = humble_data['Dollars, % Chg, Yago'].mean() * 100
-            avg_acv = humble_data['Max % ACV'].astype(float).mean()
-
-            # Top metrics
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                st.metric(
-                    "Total Sales",
-                    f"${total_sales:,.0f}",
-                    f"{avg_growth:.1f}% YoY" if not pd.isna(avg_growth) else "N/A"
-                )
-
-            with col2:
-                st.metric(
-                    "Total Units",
-                    f"{total_units:,.0f}",
-                    ""
-                )
-
-            with col3:
-                st.metric(
-                    "Avg Distribution (ACV)",
-                    f"{avg_acv:.1f}%",
-                    ""
-                )
-
-            with col4:
-                promo_sales = humble_data['Dollars, Promo'].sum()
-                promo_pct = (promo_sales / total_sales * 100) if total_sales > 0 else 0
-                st.metric(
-                    "Promo Sales %",
-                    f"{promo_pct:.1f}%",
-                    ""
-                )
-
-            st.markdown("---")
-
-            # Two column layout
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("Sales by Retailer")
-                retailer_sales = humble_data.groupby('GEOGRAPHY')['Dollars'].sum().sort_values(ascending=False).head(10)
-                fig = px.bar(
-                    x=retailer_sales.values,
-                    y=retailer_sales.index,
-                    orientation='h',
-                    labels={'x': 'Sales ($)', 'y': 'Retailer'},
-                    title=f"Top 10 Retailers - {selected_period}"
-                )
-                fig.update_layout(showlegend=False, height=400)
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                st.subheader("Growth Rate by Retailer")
-                growth_data = humble_data[['GEOGRAPHY', 'Dollars, % Chg, Yago']].dropna()
-                growth_data = growth_data.sort_values('Dollars, % Chg, Yago', ascending=False).head(10)
-
-                fig = px.bar(
-                    growth_data,
-                    x='Dollars, % Chg, Yago',
-                    y='GEOGRAPHY',
-                    orientation='h',
-                    labels={'Dollars, % Chg, Yago': 'YoY Growth %', 'GEOGRAPHY': 'Retailer'},
-                    title="Top Growth Retailers"
-                )
-                fig.update_layout(showlegend=False, height=400)
-                st.plotly_chart(fig, width='stretch')
-
-            # Time series from trend data
-            st.markdown("---")
-            st.subheader("Sales Trend - Last 2 Years")
-
-            trend_natural = trend_df[trend_df['GEOGRAPHY'] == 'TOTAL US - NATURAL EXPANDED CHANNEL'].copy()
-
-            if not trend_natural.empty:
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=trend_natural['Date'],
-                    y=trend_natural['Dollars'],
-                    mode='lines+markers',
-                    name='Sales',
-                    line=dict(color='#1f77b4', width=3)
-                ))
-
-                fig.update_layout(
-                    title='HUMBLE Sales - Natural Expanded Channel (Rolling 12 Weeks)',
-                    xaxis_title='Date',
-                    yaxis_title='Sales ($)',
-                    hovermode='x unified',
-                    height=400
-                )
-                st.plotly_chart(fig, width='stretch')
-
-        else:
-            st.warning("No data available for HUMBLE brand in selected period")
-
-    elif page == "📈 Sales Performance":
-        st.markdown('<p class="main-header">Sales Performance Analysis</p>', unsafe_allow_html=True)
-        st.markdown(f"**Period:** {selected_period}")
-        st.markdown("---")
-
-        # Brand selector
-        brands = sorted(filtered_df['DESCRIPTION'].dropna().unique())
-        selected_brand = st.selectbox("Select Brand", brands, index=brands.index('HUMBLE') if 'HUMBLE' in brands else 0)
-
-        brand_data = filtered_df[filtered_df['DESCRIPTION'] == selected_brand]
-
-        if not brand_data.empty:
-            # Summary metrics
-            col1, col2, col3, col4 = st.columns(4)
-
-            total_sales = brand_data['Dollars'].sum()
-            total_units = brand_data['Units'].sum()
-            avg_arp = (total_sales / total_units) if total_units > 0 else 0
-            yoy_growth = brand_data['Dollars, % Chg, Yago'].mean() * 100
-
-            with col1:
-                st.metric("Total Sales", f"${total_sales:,.0f}")
-            with col2:
-                st.metric("Total Units", f"{total_units:,.0f}")
-            with col3:
-                st.metric("Avg Price", f"${avg_arp:.2f}")
-            with col4:
-                growth_color = "🟢" if yoy_growth > 0 else "🔴"
-                st.metric("YoY Growth", f"{growth_color} {yoy_growth:.1f}%")
-
-            st.markdown("---")
-
-            # Detailed metrics table
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("Sales by Retailer")
-                sales_table = brand_data[['GEOGRAPHY', 'Dollars', 'Units', 'Dollars, % Chg, Yago']].copy()
-                sales_table['Dollars, % Chg, Yago'] = sales_table['Dollars, % Chg, Yago'] * 100
-                sales_table = sales_table.sort_values('Dollars', ascending=False)
-                sales_table.columns = ['Retailer', 'Sales ($)', 'Units', 'YoY Growth (%)']
-                st.dataframe(
-                    sales_table.style.format({
-                        'Sales ($)': '${:,.0f}',
-                        'Units': '{:,.0f}',
-                        'YoY Growth (%)': '{:.1f}%'
-                    }),
-                    height=400,
-                    width='stretch'
-                )
-
-            with col2:
-                st.subheader("Promotional Mix")
-                promo_data = brand_data[['GEOGRAPHY', 'Dollars, Promo', 'Dollars, Non-Promo']].copy()
-                promo_data = promo_data.groupby('GEOGRAPHY').sum().reset_index()
-                promo_data['Total'] = promo_data['Dollars, Promo'] + promo_data['Dollars, Non-Promo']
-                promo_data = promo_data.sort_values('Total', ascending=False).head(10)
-
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    name='Promo',
-                    x=promo_data['GEOGRAPHY'],
-                    y=promo_data['Dollars, Promo'],
-                    marker_color='#ff7f0e'
-                ))
-                fig.add_trace(go.Bar(
-                    name='Non-Promo',
-                    x=promo_data['GEOGRAPHY'],
-                    y=promo_data['Dollars, Non-Promo'],
-                    marker_color='#1f77b4'
-                ))
-
-                fig.update_layout(
-                    barmode='stack',
-                    title='Sales: Promo vs Non-Promo',
-                    xaxis_title='Retailer',
-                    yaxis_title='Sales ($)',
-                    height=400
-                )
-                st.plotly_chart(fig, width='stretch')
-
-            # Distribution metrics
-            st.markdown("---")
-            st.subheader("Distribution & Velocity")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                dist_data = brand_data[['GEOGRAPHY', 'Max % ACV', 'TDP']].copy()
-                dist_data['Max % ACV'] = pd.to_numeric(dist_data['Max % ACV'], errors='coerce')
-                dist_data = dist_data.dropna().sort_values('Max % ACV', ascending=False).head(10)
-
-                fig = px.bar(
-                    dist_data,
-                    x='GEOGRAPHY',
-                    y='Max % ACV',
-                    title='Store Coverage (Max % ACV)',
-                    labels={'Max % ACV': 'ACV %', 'GEOGRAPHY': 'Retailer'}
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                velocity = brand_data[['GEOGRAPHY', '# of Stores Selling', 'Units']].copy()
-                velocity['Units per Store'] = velocity['Units'] / velocity['# of Stores Selling']
-                velocity = velocity.dropna().sort_values('Units per Store', ascending=False).head(10)
-
-                fig = px.bar(
-                    velocity,
-                    x='GEOGRAPHY',
-                    y='Units per Store',
-                    title='Sales Velocity (Units per Store)',
-                    labels={'Units per Store': 'Units/Store', 'GEOGRAPHY': 'Retailer'}
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, width='stretch')
-
-    elif page == "🏆 Competitive Analysis":
-        st.markdown('<p class="main-header">Competitive Analysis</p>', unsafe_allow_html=True)
-        st.markdown(f"**Period:** {selected_period}")
-        st.markdown("---")
-
-        # Geography selector
-        geographies = sorted(filtered_df['GEOGRAPHY'].dropna().unique())
-        selected_geo = st.selectbox("Select Market/Retailer", geographies)
-
-        geo_data = filtered_df[filtered_df['GEOGRAPHY'] == selected_geo].copy()
-
-        if not geo_data.empty:
-            # Top brands
-            top_brands = geo_data.nlargest(20, 'Dollars')
-
-            st.subheader(f"Top 20 Brands - {selected_geo}")
-
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
-                fig = px.bar(
-                    top_brands,
-                    x='Dollars',
-                    y='DESCRIPTION',
-                    orientation='h',
-                    title='Sales Ranking',
-                    labels={'Dollars': 'Sales ($)', 'DESCRIPTION': 'Brand'}
-                )
-                fig.update_layout(height=600, yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                # Market share
-                top_brands_copy = top_brands.copy()
-                total_top20 = top_brands_copy['Dollars'].sum()
-                top_brands_copy['Share'] = (top_brands_copy['Dollars'] / total_top20 * 100)
-
-                st.markdown("### Market Share %")
-                share_table = top_brands_copy[['DESCRIPTION', 'Share', 'Dollars']].sort_values('Share', ascending=False)
-                share_table.columns = ['Brand', 'Share %', 'Sales ($)']
-                st.dataframe(
-                    share_table.style.format({
-                        'Share %': '{:.1f}%',
-                        'Sales ($)': '${:,.0f}'
-                    }),
-                    height=600,
-                    width='stretch'
-                )
-
-            st.markdown("---")
-
-            # Growth leaders vs laggards
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("Growth Leaders")
-                growth_leaders = geo_data.nlargest(10, 'Dollars, % Chg, Yago')[['DESCRIPTION', 'Dollars', 'Dollars, % Chg, Yago']].copy()
-                growth_leaders['Dollars, % Chg, Yago'] = growth_leaders['Dollars, % Chg, Yago'] * 100
-                growth_leaders = growth_leaders[growth_leaders['Dollars, % Chg, Yago'] > 0]
-
-                if not growth_leaders.empty:
-                    fig = px.bar(
-                        growth_leaders,
-                        x='Dollars, % Chg, Yago',
-                        y='DESCRIPTION',
-                        orientation='h',
-                        title='Fastest Growing Brands (YoY %)',
-                        labels={'Dollars, % Chg, Yago': 'Growth %', 'DESCRIPTION': 'Brand'}
-                    )
-                    fig.update_layout(height=400)
-                    st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                st.subheader("Declining Brands")
-                decliners = geo_data.nsmallest(10, 'Dollars, % Chg, Yago')[['DESCRIPTION', 'Dollars', 'Dollars, % Chg, Yago']].copy()
-                decliners['Dollars, % Chg, Yago'] = decliners['Dollars, % Chg, Yago'] * 100
-                decliners = decliners[decliners['Dollars, % Chg, Yago'] < 0]
-
-                if not decliners.empty:
-                    fig = px.bar(
-                        decliners,
-                        x='Dollars, % Chg, Yago',
-                        y='DESCRIPTION',
-                        orientation='h',
-                        title='Declining Brands (YoY %)',
-                        labels={'Dollars, % Chg, Yago': 'Growth %', 'DESCRIPTION': 'Brand'},
-                        color_discrete_sequence=['#dc3545']
-                    )
-                    fig.update_layout(height=400)
-                    st.plotly_chart(fig, width='stretch')
-
-    elif page == "🏪 Retailer Performance":
-        st.markdown('<p class="main-header">Retailer Performance</p>', unsafe_allow_html=True)
-        st.markdown(f"**Period:** {selected_period}")
-        st.markdown("---")
-
-        # Focus on Humble
-        humble_data = filtered_df[filtered_df['DESCRIPTION'] == 'HUMBLE'].copy()
-
-        if not humble_data.empty:
-            st.subheader("HUMBLE Performance by Retailer")
-            st.markdown("*Retailers ranked by Performance Score (weighted combination of sales volume + growth)*")
-
-            # Create comprehensive retailer scorecard
-            scorecard = humble_data[[
-                'GEOGRAPHY', 'Dollars', 'Units', 'Dollars, % Chg, Yago',
-                'Max % ACV', 'TDP', 'Dollars, Promo', '# of Stores Selling'
-            ]].copy()
-
-            scorecard['Promo %'] = (scorecard['Dollars, Promo'] / scorecard['Dollars'] * 100)
-            scorecard['Dollars, % Chg, Yago'] = scorecard['Dollars, % Chg, Yago'] * 100
-            scorecard['Max % ACV'] = pd.to_numeric(scorecard['Max % ACV'], errors='coerce')
-
-            # Calculate Performance Score (weighted: 70% volume, 30% growth)
-            # Normalize sales to 0-100 scale
-            max_sales = scorecard['Dollars'].max()
-            scorecard['Sales Score'] = (scorecard['Dollars'] / max_sales * 100) if max_sales > 0 else 0
-
-            # Growth score: cap at +50% and -50% for scoring purposes
-            scorecard['Growth Score'] = scorecard['Dollars, % Chg, Yago'].clip(-50, 50)
-            # Normalize to 0-100 scale (0% growth = 50 points, +50% = 100 points, -50% = 0 points)
-            scorecard['Growth Score'] = ((scorecard['Growth Score'] + 50) / 100 * 100)
-
-            # Combined Performance Score (70% sales, 30% growth)
-            scorecard['Performance Score'] = (scorecard['Sales Score'] * 0.7 + scorecard['Growth Score'] * 0.3)
-
-            # Add priority tier
-            def get_priority(row):
-                score = row['Performance Score']
-                if score >= 70:
-                    return '🟢 High'
-                elif score >= 50:
-                    return '🟡 Medium'
-                else:
-                    return '🔴 Low'
-
-            scorecard['Priority'] = scorecard.apply(get_priority, axis=1)
-
-            # Sort by performance score
-            scorecard = scorecard.sort_values('Performance Score', ascending=False)
-
-            # Display table
-            display_cols = ['GEOGRAPHY', 'Performance Score', 'Priority', 'Dollars', 'Dollars, % Chg, Yago', 'Units', 'Max % ACV', 'TDP', 'Promo %', '# of Stores Selling']
-            scorecard_display = scorecard[display_cols].copy()
-            scorecard_display.columns = ['Retailer', 'Performance Score', 'Priority', 'Sales ($)', 'YoY Growth %', 'Units', 'ACV %', 'TDP', 'Promo %', 'Stores']
-
-            st.dataframe(
-                scorecard_display.style.format({
-                    'Performance Score': '{:.0f}',
-                    'Sales ($)': '${:,.0f}',
-                    'Units': '{:,.0f}',
-                    'YoY Growth %': '{:.1f}%',
-                    'ACV %': '{:.1f}',
-                    'TDP': '{:.1f}',
-                    'Promo %': '{:.1f}%',
-                    'Stores': '{:.0f}'
-                }).background_gradient(subset=['Performance Score'], cmap='RdYlGn', vmin=0, vmax=100),
-                width='stretch',
-                height=400
-            )
-
-            # Add explanation
-            with st.expander("ℹ️ How Performance Score Works"):
-                st.markdown("""
-                **Performance Score Formula:**
-                - 70% weighted on Sales Volume (bigger accounts = higher score)
-                - 30% weighted on YoY Growth Rate (faster growth = higher score)
-
-                **Why This Matters:**
-                - A retailer with $2M+ sales and 20% growth scores higher than one with $90K and 800% growth
-                - Focuses your attention on accounts that drive real business impact
-                - Growth is still rewarded, but volume ensures you prioritize the right accounts
-
-                **Priority Tiers:**
-                - 🟢 High (70-100): Top accounts - maintain momentum
-                - 🟡 Medium (50-69): Important accounts - growth opportunities
-                - 🔴 Low (<50): Monitor or consider de-prioritizing
+                **Action:** Investigate root causes. This may indicate pricing pressure, distribution losses,
+                or velocity issues that need immediate attention.
                 """)
+            else:
+                st.info("All drivers contributing positively to growth!")
 
+# ====================================================================================
+# PROMOTIONAL ANALYSIS PAGE
+# ====================================================================================
+elif page == "🎯 Promotional Analysis":
+    st.markdown("<h1 class='main-header'>🎯 Promotional Analysis</h1>", unsafe_allow_html=True)
+    st.markdown("**Measuring promotional effectiveness and ROI**")
+    st.markdown("---")
 
-            st.markdown("---")
+    promo = data['promo']
 
-            # Quadrant Analysis
-            st.subheader("📊 Strategic Quadrant Analysis")
-            st.markdown("*Volume vs Growth: Where should you focus your resources?*")
+    if promo.empty or len(promo) == 0:
+        st.warning("⚠️ Promotional data not available in this PowerTabs report")
+        st.info("This may indicate:\n- No promotions ran during this period\n- This sheet requires a specific retailer filter in PowerTabs\n- Promotional data is in a different report")
+    else:
+        # Promo effectiveness
+        st.markdown("### 🎯 Promotional Effectiveness")
 
-            # Create quadrant scatter plot
-            median_sales = scorecard['Dollars'].median()
-            median_growth = scorecard['Dollars, % Chg, Yago'].median()
+        col1, col2 = st.columns(2)
 
-            fig = go.Figure()
-
-            # Add scatter points with color by priority
-            for priority, color in [('🟢 High', '#28a745'), ('🟡 Medium', '#ffc107'), ('🔴 Low', '#dc3545')]:
-                subset = scorecard[scorecard['Priority'] == priority]
-                fig.add_trace(go.Scatter(
-                    x=subset['Dollars'],
-                    y=subset['Dollars, % Chg, Yago'],
-                    mode='markers+text',
-                    name=priority,
-                    text=subset['GEOGRAPHY'].str[:15],  # Truncate long names
-                    textposition='top center',
-                    marker=dict(size=12, color=color),
-                    hovertemplate='<b>%{text}</b><br>Sales: $%{x:,.0f}<br>Growth: %{y:.1f}%<extra></extra>'
-                ))
-
-            # Add median lines
-            fig.add_hline(y=median_growth, line_dash="dash", line_color="gray", annotation_text="Median Growth")
-            fig.add_vline(x=median_sales, line_dash="dash", line_color="gray", annotation_text="Median Sales")
-
-            # Add quadrant labels
-            max_sales = scorecard['Dollars'].max()
-            max_growth = scorecard['Dollars, % Chg, Yago'].max()
-            min_growth = scorecard['Dollars, % Chg, Yago'].min()
-
-            annotations = [
-                dict(x=max_sales * 0.75, y=max_growth * 0.9, text="🌟 STARS<br>(High Sales + High Growth)", showarrow=False, font=dict(size=10, color='green')),
-                dict(x=max_sales * 0.75, y=min_growth * 0.5, text="💰 CASH COWS<br>(High Sales + Low Growth)", showarrow=False, font=dict(size=10, color='blue')),
-                dict(x=median_sales * 0.3, y=max_growth * 0.9, text="🚀 RISING STARS<br>(Low Sales + High Growth)", showarrow=False, font=dict(size=10, color='orange')),
-                dict(x=median_sales * 0.3, y=min_growth * 0.5, text="⚠️ QUESTION MARKS<br>(Low Sales + Low Growth)", showarrow=False, font=dict(size=10, color='red'))
-            ]
-
-            fig.update_layout(
-                title='Retailer Portfolio Matrix',
-                xaxis_title='Sales Volume ($)',
-                yaxis_title='YoY Growth (%)',
-                height=500,
-                hovermode='closest',
-                annotations=annotations,
-                showlegend=True
+        with col1:
+            # Dollar lift by promo
+            fig_dollar = px.bar(
+                promo.sort_values('$ % Lift', ascending=False),
+                x='Promo ID',
+                y='$ % Lift',
+                title="Dollar Lift % by Promotion",
+                text='$ % Lift',
+                color='$ % Lift',
+                color_continuous_scale='Blues'
             )
+            fig_dollar.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+            st.plotly_chart(fig_dollar, use_container_width=True)
 
-            st.plotly_chart(fig, width='stretch')
+        with col2:
+            # Unit lift by promo
+            fig_unit = px.bar(
+                promo.sort_values('U % Lift', ascending=False),
+                x='Promo ID',
+                y='U % Lift',
+                title="Unit Lift % by Promotion",
+                text='U % Lift',
+                color='U % Lift',
+                color_continuous_scale='Greens'
+            )
+            fig_unit.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+            st.plotly_chart(fig_unit, use_container_width=True)
 
-            # Add interpretation guide
-            col1, col2, col3, col4 = st.columns(4)
+        # Discount vs Lift analysis
+        st.markdown("### 📉 Discount vs Lift Analysis")
 
-            with col1:
-                st.markdown("**🌟 Stars**")
-                stars = scorecard[(scorecard['Dollars'] > median_sales) & (scorecard['Dollars, % Chg, Yago'] > median_growth)]
-                st.markdown(f"**{len(stars)} retailers**")
-                st.markdown("*Invest & grow*")
-
-            with col2:
-                st.markdown("**💰 Cash Cows**")
-                cash_cows = scorecard[(scorecard['Dollars'] > median_sales) & (scorecard['Dollars, % Chg, Yago'] <= median_growth)]
-                st.markdown(f"**{len(cash_cows)} retailers**")
-                st.markdown("*Maintain & optimize*")
-
-            with col3:
-                st.markdown("**🚀 Rising Stars**")
-                rising = scorecard[(scorecard['Dollars'] <= median_sales) & (scorecard['Dollars, % Chg, Yago'] > median_growth)]
-                st.markdown(f"**{len(rising)} retailers**")
-                st.markdown("*Invest to scale*")
-
-            with col4:
-                st.markdown("**⚠️ Question Marks**")
-                question = scorecard[(scorecard['Dollars'] <= median_sales) & (scorecard['Dollars, % Chg, Yago'] <= median_growth)]
-                st.markdown(f"**{len(question)} retailers**")
-                st.markdown("*Fix or exit*")
-
-            st.markdown("---")
-
-            # Additional visualizations
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.subheader("Top 10 by Performance Score")
-                top_performers = scorecard.head(10)[['GEOGRAPHY', 'Performance Score', 'Dollars', 'Dollars, % Chg, Yago']].copy()
-
-                fig = px.bar(
-                    top_performers,
-                    x='Performance Score',
-                    y='GEOGRAPHY',
-                    orientation='h',
-                    title='Highest Performing Retailers',
-                    labels={'Performance Score': 'Score (0-100)', 'GEOGRAPHY': 'Retailer'},
-                    color='Performance Score',
-                    color_continuous_scale='RdYlGn'
-                )
-                fig.update_layout(height=400, yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                st.subheader("Sales vs Distribution")
-                scatter_data = scorecard.dropna(subset=['Max % ACV', 'Dollars']).head(15)
-
-                fig = px.scatter(
-                    scatter_data,
-                    x='Max % ACV',
-                    y='Dollars',
-                    size='Units',
-                    text='GEOGRAPHY',
-                    labels={'Max % ACV': 'Distribution (ACV %)', 'Dollars': 'Sales ($)'},
-                    title='Coverage vs Revenue'
-                )
-                fig.update_traces(textposition='top center', textfont_size=8)
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, width='stretch')
-
-    elif page == "📉 Trend Analysis":
-        st.markdown('<p class="main-header">Trend Analysis</p>', unsafe_allow_html=True)
-        st.markdown("---")
-
-        # Geography selector for trends
-        geographies = sorted(trend_df['GEOGRAPHY'].dropna().unique())
-        selected_geos = st.multiselect(
-            "Select Channels to Compare",
-            geographies,
-            default=['TOTAL US - NATURAL EXPANDED CHANNEL']
+        fig_scatter = px.scatter(
+            promo,
+            x='% Disc',
+            y='$ % Lift',
+            size='# of Weeks',
+            color='U % Lift',
+            hover_data=['Base Price', 'Promo Price'],
+            title="Discount Depth vs Dollar Lift (Size = Duration)",
+            labels={'% Disc': 'Discount %', '$ % Lift': 'Dollar Lift %'}
         )
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
-        if selected_geos:
-            trend_subset = trend_df[trend_df['GEOGRAPHY'].isin(selected_geos)].copy()
+        # Promo details table
+        st.markdown("### 📋 Promotion Details")
 
-            # Sales trend
-            st.subheader("Sales Trend (12-Week Rolling)")
+        display_promo = promo.copy()
+        display_promo['Base Price'] = display_promo['Base Price'].apply(lambda x: f"${x:.2f}")
+        display_promo['Promo Price'] = display_promo['Promo Price'].apply(lambda x: f"${x:.2f}")
+        display_promo['% Disc'] = display_promo['% Disc'].apply(lambda x: f"{x*100:.1f}%")
+        display_promo['$ % Lift'] = display_promo['$ % Lift'].apply(lambda x: f"{x*100:.1f}%")
+        display_promo['U % Lift'] = display_promo['U % Lift'].apply(lambda x: f"{x*100:.1f}%")
 
-            fig = px.line(
-                trend_subset,
-                x='Date',
-                y='Dollars',
-                color='GEOGRAPHY',
-                markers=True,
-                labels={'Dollars': 'Sales ($)', 'Date': 'Period', 'GEOGRAPHY': 'Channel'},
-                title='HUMBLE Sales Trend by Channel'
-            )
-            fig.update_layout(height=400, hovermode='x unified')
-            st.plotly_chart(fig, width='stretch')
+        st.dataframe(display_promo, use_container_width=True, hide_index=True)
 
-            # Growth rate trend
-            st.subheader("YoY Growth Rate Trend")
-
-            trend_subset_growth = trend_subset.copy()
-            trend_subset_growth['Dollars, % Chg, Yago'] = pd.to_numeric(trend_subset_growth['Dollars, % Chg, Yago'], errors='coerce') * 100
-
-            fig = px.line(
-                trend_subset_growth,
-                x='Date',
-                y='Dollars, % Chg, Yago',
-                color='GEOGRAPHY',
-                markers=True,
-                labels={'Dollars, % Chg, Yago': 'YoY Growth %', 'Date': 'Period', 'GEOGRAPHY': 'Channel'},
-                title='YoY Growth Rate Trend'
-            )
-            fig.add_hline(y=0, line_dash="dash", line_color="gray")
-            fig.update_layout(height=400, hovermode='x unified')
-            st.plotly_chart(fig, width='stretch')
-
-            # Multi-metric dashboard
-            st.markdown("---")
-            st.subheader("Key Metrics Over Time")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                fig = px.line(
-                    trend_subset,
-                    x='Date',
-                    y='Max % ACV',
-                    color='GEOGRAPHY',
-                    markers=True,
-                    labels={'Max % ACV': 'ACV %', 'Date': 'Period', 'GEOGRAPHY': 'Channel'},
-                    title='Distribution (Max % ACV)'
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                fig = px.line(
-                    trend_subset,
-                    x='Date',
-                    y='TDP',
-                    color='GEOGRAPHY',
-                    markers=True,
-                    labels={'TDP': 'TDP', 'Date': 'Period', 'GEOGRAPHY': 'Channel'},
-                    title='Total Distribution Points (TDP)'
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, width='stretch')
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                trend_subset_promo = trend_subset.copy()
-                trend_subset_promo['Promo %'] = (trend_subset_promo['Dollars, Promo'] / trend_subset_promo['Dollars'] * 100)
-
-                fig = px.line(
-                    trend_subset_promo,
-                    x='Date',
-                    y='Promo %',
-                    color='GEOGRAPHY',
-                    markers=True,
-                    labels={'Promo %': 'Promo Sales %', 'Date': 'Period', 'GEOGRAPHY': 'Channel'},
-                    title='Promotional Activity (%)'
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                fig = px.line(
-                    trend_subset,
-                    x='Date',
-                    y='# of Stores Selling',
-                    color='GEOGRAPHY',
-                    markers=True,
-                    labels={'# of Stores Selling': 'Store Count', 'Date': 'Period', 'GEOGRAPHY': 'Channel'},
-                    title='Number of Stores Selling'
-                )
-                fig.update_layout(height=350)
-                st.plotly_chart(fig, width='stretch')
-
-    elif page == "🎯 Promotional Analysis":
-        st.markdown('<p class="main-header">Promotional Analysis</p>', unsafe_allow_html=True)
-        st.markdown(f"**Period:** {selected_period}")
+        # Recommendations
         st.markdown("---")
+        st.markdown("### 💡 Promotional Recommendations")
 
-        # Focus on Humble
-        humble_data = filtered_df[filtered_df['DESCRIPTION'] == 'HUMBLE'].copy()
+        # Find most efficient promo (best lift per discount point)
+        promo['efficiency'] = promo['$ % Lift'] / abs(promo['% Disc'])
+        best_promo = promo.nlargest(1, 'efficiency').iloc[0]
 
-        if not humble_data.empty:
-            # Calculate promotional metrics
-            humble_data['Promo %'] = (humble_data['Dollars, Promo'] / humble_data['Dollars'] * 100)
-            humble_data['Units Promo %'] = (humble_data['Units, Promo'] / humble_data['Units'] * 100)
+        col1, col2 = st.columns(2)
 
-            # Summary
-            total_sales = humble_data['Dollars'].sum()
-            promo_sales = humble_data['Dollars, Promo'].sum()
-            promo_pct = (promo_sales / total_sales * 100)
+        with col1:
+            st.success(f"""
+            **Most Efficient Promotion**
 
-            col1, col2, col3, col4 = st.columns(4)
+            **Promo ID:** {int(best_promo['Promo ID'])}
+            - **Discount:** {best_promo['% Disc']*100:.1f}%
+            - **Dollar Lift:** {best_promo['$ % Lift']*100:.1f}%
+            - **Efficiency:** {best_promo['efficiency']:.2f}x
 
-            with col1:
-                st.metric("Total Sales", f"${total_sales:,.0f}")
-            with col2:
-                st.metric("Promo Sales", f"${promo_sales:,.0f}")
-            with col3:
-                st.metric("Promo %", f"{promo_pct:.1f}%")
-            with col4:
-                non_promo_sales = total_sales - promo_sales
-                st.metric("Non-Promo Sales", f"${non_promo_sales:,.0f}")
+            This promotion delivered the best return per discount point.
+            """)
 
-            st.markdown("---")
+        with col2:
+            avg_discount = promo['% Disc'].mean() * 100
+            avg_lift = promo['$ % Lift'].mean() * 100
 
-            # Promo effectiveness by retailer
-            st.subheader("Promotional Effectiveness by Retailer")
+            st.info(f"""
+            **Average Performance**
 
-            promo_analysis = humble_data[[
-                'GEOGRAPHY', 'Dollars', 'Dollars, Promo', 'Dollars, Non-Promo',
-                'Units, Promo', 'Units, Non-Promo', 'Promo %'
-            ]].copy()
-            promo_analysis = promo_analysis.sort_values('Dollars', ascending=False)
+            - **Avg Discount:** {avg_discount:.1f}%
+            - **Avg Dollar Lift:** {avg_lift:.1f}%
+            - **Total Promo Weeks:** {promo['# of Weeks'].sum():.0f}
 
-            col1, col2 = st.columns([2, 1])
+            Use these benchmarks for future promotional planning.
+            """)
 
-            with col1:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    name='Promo Sales',
-                    x=promo_analysis['GEOGRAPHY'],
-                    y=promo_analysis['Dollars, Promo'],
-                    marker_color='#ff7f0e'
-                ))
-                fig.add_trace(go.Bar(
-                    name='Non-Promo Sales',
-                    x=promo_analysis['GEOGRAPHY'],
-                    y=promo_analysis['Dollars, Non-Promo'],
-                    marker_color='#1f77b4'
-                ))
-
-                fig.update_layout(
-                    barmode='stack',
-                    title='Sales Mix: Promo vs Non-Promo by Retailer',
-                    xaxis_title='Retailer',
-                    yaxis_title='Sales ($)',
-                    height=400,
-                    xaxis={'tickangle': 45}
-                )
-                st.plotly_chart(fig, width='stretch')
-
-            with col2:
-                st.markdown("### Promo % by Retailer")
-                promo_pct_data = promo_analysis[['GEOGRAPHY', 'Promo %']].sort_values('Promo %', ascending=False)
-                promo_pct_data.columns = ['Retailer', 'Promo %']
-                st.dataframe(
-                    promo_pct_data.style.format({'Promo %': '{:.1f}%'}).background_gradient(subset=['Promo %'], cmap='Oranges'),
-                    height=400,
-                    width='stretch'
-                )
-
-            st.markdown("---")
-
-            # Promo trends
-            st.subheader("Promotional Trends Over Time")
-
-            # Use trend data for time series
-            trend_natural = trend_df[trend_df['GEOGRAPHY'] == 'TOTAL US - NATURAL EXPANDED CHANNEL'].copy()
-
-            if not trend_natural.empty:
-                trend_natural['Promo %'] = (trend_natural['Dollars, Promo'] / trend_natural['Dollars'] * 100)
-                trend_natural['Units Promo %'] = (trend_natural['Units, Promo'] / trend_natural['Units'] * 100)
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=trend_natural['Date'],
-                        y=trend_natural['Dollars, Promo'],
-                        name='Promo Sales',
-                        fill='tonexty',
-                        line=dict(color='#ff7f0e')
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=trend_natural['Date'],
-                        y=trend_natural['Dollars, Non-Promo'],
-                        name='Non-Promo Sales',
-                        fill='tozeroy',
-                        line=dict(color='#1f77b4')
-                    ))
-
-                    fig.update_layout(
-                        title='Promo vs Non-Promo Sales Trend',
-                        xaxis_title='Date',
-                        yaxis_title='Sales ($)',
-                        height=350,
-                        hovermode='x unified'
-                    )
-                    st.plotly_chart(fig, width='stretch')
-
-                with col2:
-                    fig = px.line(
-                        trend_natural,
-                        x='Date',
-                        y='Promo %',
-                        markers=True,
-                        labels={'Promo %': 'Promotional Sales %', 'Date': 'Period'},
-                        title='Promotional Mix % Over Time'
-                    )
-                    fig.update_layout(height=350)
-                    st.plotly_chart(fig, width='stretch')
-
-    # Footer
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### Data Refresh")
-    st.sidebar.info(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### About")
-    st.sidebar.markdown("""
-    This dashboard analyzes SPINS market data for marketing decision-making.
-
-    **Key Metrics:**
-    - **Sales**: Dollar and unit volume
-    - **ACV**: All Commodity Volume (store coverage %)
-    - **TDP**: Total Distribution Points (weighted distribution)
-    - **ARP**: Average Retail Price
-    - **YoY**: Year-over-year comparison
-    """)
-
-else:
-    st.error("Unable to load data. Please ensure the Excel files are in the correct directory.")
+# Footer
+st.markdown("---")
+st.markdown("**SPINS Marketing Intelligence Dashboard** | Built for Humble Brands | Data powered by SPINS PowerTabs")
