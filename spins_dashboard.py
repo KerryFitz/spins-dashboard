@@ -976,9 +976,21 @@ elif page == "📊 Historical Trends":
     st.markdown("---")
 
     # Load historical data from database
-    hist_df = load_historical_from_db()
+    try:
+        hist_df = load_historical_from_db()
 
-    if hist_df.empty:
+        # Debug info
+        st.info(f"📊 Database status: Found {len(hist_df)} snapshots")
+
+        if len(hist_df) > 0:
+            st.write("**Database columns:**", list(hist_df.columns))
+            st.write("**First row:**", hist_df.iloc[0].to_dict() if len(hist_df) > 0 else "No data")
+
+    except Exception as e:
+        st.error(f"Error loading database: {e}")
+        hist_df = pd.DataFrame()
+
+    if hist_df.empty or len(hist_df) == 0:
         st.info("👈 **No historical data yet!**")
         st.markdown("""
         ### How to Build Historical Data:
@@ -996,34 +1008,42 @@ elif page == "📊 Historical Trends":
         """)
     else:
         # Prepare data for charts
-        hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
-        hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
+        try:
+            hist_df['sales_growth'] = hist_df['sales_growth_52w'] * 100
+            hist_df['units_growth'] = hist_df['units_growth_52w'] * 100
+        except Exception as e:
+            st.error(f"Error preparing data: {e}")
+            st.stop()
 
         # Sales Trend
         st.markdown("### 📈 Sales Trend Over Time")
 
-        fig_sales = go.Figure()
-        fig_sales.add_trace(go.Scatter(
-            x=hist_df['data_period'],
-            y=hist_df['sales_52w'],
-            mode='lines+markers',
-            name='Sales',
-            text=[f"${val/1e6:.2f}M" for val in hist_df['sales_52w']],
-            textposition='top center',
-            line=dict(color='#1f77b4', width=3),
-            marker=dict(size=10)
-        ))
+        try:
+            fig_sales = go.Figure()
+            fig_sales.add_trace(go.Scatter(
+                x=hist_df['data_period'],
+                y=hist_df['sales_52w'],
+                mode='lines+markers',
+                name='Sales',
+                text=[f"${val/1e6:.2f}M" for val in hist_df['sales_52w']],
+                textposition='top center',
+                line=dict(color='#1f77b4', width=3),
+                marker=dict(size=10)
+            ))
 
-        fig_sales.update_layout(
-            title="52-Week Sales Trend",
-            xaxis_title="Period",
-            yaxis_title="Sales ($)",
-            height=400,
-            showlegend=False,
-            xaxis_tickangle=-45
-        )
+            fig_sales.update_layout(
+                title="52-Week Sales Trend",
+                xaxis_title="Period",
+                yaxis_title="Sales ($)",
+                height=400,
+                showlegend=False,
+                xaxis_tickangle=-45
+            )
 
-        st.plotly_chart(fig_sales, use_container_width=True)
+            st.plotly_chart(fig_sales, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error creating sales chart: {e}")
+            st.write("**Debug - hist_df:**", hist_df)
 
         # Growth Rate Comparison
         col1, col2 = st.columns(2)
