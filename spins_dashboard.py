@@ -9,6 +9,7 @@ import json
 import io
 import sqlite3
 from pathlib import Path
+import hashlib
 
 # Page configuration
 st.set_page_config(
@@ -17,6 +18,67 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Password Protection
+def check_password():
+    """Returns True if the user has entered the correct password."""
+
+    # Password hash for 1336Gusdorf!
+    CORRECT_PASSWORD_HASH = "4be3b4171f398c0851b8f469a0ff7b6a9efb5e06b8fcbd514176c1ae3bd2f038"
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        entered_password = st.session_state["password"]
+        entered_hash = hashlib.sha256(entered_password.encode()).hexdigest()
+
+        if entered_hash == CORRECT_PASSWORD_HASH:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store the password
+        else:
+            st.session_state["password_correct"] = False
+
+    # First run, show password input
+    if "password_correct" not in st.session_state:
+        st.markdown("<h1 style='text-align: center;'>🔒 SPINS Marketing Intelligence Dashboard</h1>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center;'>Humble Brands - Secure Access</h3>", unsafe_allow_html=True)
+        st.markdown("---")
+
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.text_input(
+                "Enter Password",
+                type="password",
+                on_change=password_entered,
+                key="password",
+                help="Contact your administrator if you need access"
+            )
+        return False
+
+    # Password not correct, show input + error
+    elif not st.session_state["password_correct"]:
+        st.markdown("<h1 style='text-align: center;'>🔒 SPINS Marketing Intelligence Dashboard</h1>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center;'>Humble Brands - Secure Access</h3>", unsafe_allow_html=True)
+        st.markdown("---")
+
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.error("😕 Incorrect password. Please try again.")
+            st.text_input(
+                "Enter Password",
+                type="password",
+                on_change=password_entered,
+                key="password",
+                help="Contact your administrator if you need access"
+            )
+        return False
+
+    # Password correct
+    else:
+        return True
+
+# Check password before loading dashboard
+if not check_password():
+    st.stop()
 
 # Custom CSS
 st.markdown("""
