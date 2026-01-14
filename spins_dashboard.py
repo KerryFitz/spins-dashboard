@@ -311,6 +311,20 @@ if data is None or 'overview' not in data:
 
 # If data loaded successfully, continue with dashboard
 
+# Time Period Selector
+st.sidebar.markdown("### 🕐 Time Period")
+overview = data['overview']
+available_periods = overview.iloc[:, 0].tolist()
+
+selected_period = st.sidebar.selectbox(
+    "Select Time Period",
+    available_periods,
+    index=0,  # Default to 52 Weeks
+    help="Choose the time horizon for your analysis"
+)
+
+st.sidebar.markdown("---")
+
 # Add current data to history button
 st.sidebar.markdown("### 💾 Save to Historical Database")
 
@@ -343,53 +357,52 @@ st.sidebar.markdown("---")
 
 # Show period info
 if 'period_info' in data and data['period_info']:
-    st.sidebar.markdown("### Data Period")
+    st.sidebar.markdown("### 📅 Data Period")
     period_text = data['period_info']
     # Extract just the time period part
     if '|' in period_text:
         period_parts = period_text.split('|')
         period = period_parts[0].replace('Period:', '').strip()
-        st.sidebar.info(f"📅 {period}")
+        st.sidebar.info(f"{period}")
+
+# Get selected period data
+selected_period_data = overview[overview.iloc[:, 0] == selected_period].iloc[0]
+selected_sales = float(selected_period_data.iloc[1])
+selected_sales_growth = float(selected_period_data.iloc[2])
+selected_units = float(selected_period_data.iloc[3])
+selected_units_growth = float(selected_period_data.iloc[4])
 
 # ====================================================================================
 # STRATEGIC INSIGHTS PAGE
 # ====================================================================================
 if page == "💡 Strategic Insights":
     st.markdown("<h1 class='main-header'>💡 Strategic Insights</h1>", unsafe_allow_html=True)
-    st.markdown("**AI-powered analysis and actionable recommendations for your marketing strategy**")
+    st.markdown(f"**AI-powered analysis and actionable recommendations for {selected_period}**")
     st.markdown("---")
 
-    overview = data['overview']
     retailers = data['retailers']
     retailer_growth = data['retailer_growth']
     growth_drivers = data['growth_drivers']
 
-    # Get 52-week metrics
-    week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
-    if not week_52.empty:
-        total_sales = float(week_52.iloc[0, 1])
-        sales_growth = float(week_52.iloc[0, 2]) * 100
-        total_units = float(week_52.iloc[0, 3])
-        units_growth = float(week_52.iloc[0, 4]) * 100
-    else:
-        total_sales = 0
-        sales_growth = 0
-        total_units = 0
-        units_growth = 0
+    # Use selected period metrics
+    total_sales = selected_sales
+    sales_growth = selected_sales_growth * 100
+    total_units = selected_units
+    units_growth = selected_units_growth * 100
 
     # Executive Summary
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric(
-            "Total Sales (52W)",
+            f"Total Sales ({selected_period})",
             f"${total_sales/1e6:.2f}M",
             f"{sales_growth:+.1f}%"
         )
 
     with col2:
         st.metric(
-            "Total Units (52W)",
+            f"Total Units ({selected_period})",
             f"{total_units/1e3:.1f}K",
             f"{units_growth:+.1f}%"
         )
@@ -577,13 +590,43 @@ if page == "💡 Strategic Insights":
 # ====================================================================================
 elif page == "🏠 Executive Overview":
     st.markdown("<h1 class='main-header'>🏠 Executive Overview</h1>", unsafe_allow_html=True)
-    st.markdown("**High-level performance metrics and trends**")
+    st.markdown(f"**High-level performance metrics for {selected_period}**")
     st.markdown("---")
 
-    overview = data['overview']
+    # Selected Period Metrics
+    col1, col2, col3, col4 = st.columns(4)
 
-    # Performance by Time Period
-    st.markdown("### 📊 Performance by Time Period")
+    with col1:
+        st.metric(
+            "Sales",
+            f"${selected_sales/1e6:.2f}M",
+            f"{selected_sales_growth*100:+.1f}%"
+        )
+
+    with col2:
+        st.metric(
+            "Units",
+            f"{selected_units/1e3:.1f}K",
+            f"{selected_units_growth*100:+.1f}%"
+        )
+
+    with col3:
+        avg_price = selected_sales / selected_units if selected_units > 0 else 0
+        st.metric(
+            "Avg Price",
+            f"${avg_price:.2f}"
+        )
+
+    with col4:
+        st.metric(
+            "Period",
+            selected_period
+        )
+
+    st.markdown("---")
+
+    # All Time Periods Comparison
+    st.markdown("### 📊 Performance Across All Time Periods")
 
     if not overview.empty:
         # Create metrics display
