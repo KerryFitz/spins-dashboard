@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime
+import json
+import io
 
 # Page configuration
 st.set_page_config(
@@ -126,9 +128,67 @@ def load_powertabs_data(file_source=None):
         st.error(f"Error loading PowerTabs data: {e}")
         return None
 
+def extract_historical_snapshot(data, upload_date=None):
+    """Extract key metrics from PowerTabs data for historical tracking"""
+    if upload_date is None:
+        upload_date = datetime.now().strftime('%Y-%m-%d')
+
+    snapshot = {
+        'upload_date': upload_date,
+        'data_period': data.get('period_info', ''),
+        'metrics': {}
+    }
+
+    # Extract 52-week metrics from overview
+    if 'overview' in data and not data['overview'].empty:
+        overview = data['overview']
+        week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
+        if not week_52.empty:
+            snapshot['metrics']['sales_52w'] = float(week_52.iloc[0, 1])
+            snapshot['metrics']['sales_growth_52w'] = float(week_52.iloc[0, 2])
+            snapshot['metrics']['units_52w'] = float(week_52.iloc[0, 3])
+            snapshot['metrics']['units_growth_52w'] = float(week_52.iloc[0, 4])
+
+    # Extract retailer count and top retailer
+    if 'retailers' in data and not data['retailers'].empty:
+        retailers = data['retailers']
+        snapshot['metrics']['retailer_count'] = len(retailers)
+        snapshot['metrics']['top_retailer'] = retailers.iloc[0, 0]
+        snapshot['metrics']['top_retailer_sales'] = float(retailers.iloc[0, 1])
+
+    # Extract growth drivers
+    if 'growth_drivers' in data and not data['growth_drivers'].empty:
+        drivers = data['growth_drivers']
+        snapshot['growth_drivers'] = {}
+        for _, row in drivers.iterrows():
+            driver_name = row.iloc[0]
+            snapshot['growth_drivers'][driver_name] = {
+                'yag': float(row.iloc[1]),
+                'latest': float(row.iloc[2]),
+                'change': float(row.iloc[3]),
+                'dollar_impact': float(row.iloc[4])
+            }
+
+    return snapshot
+
+def save_historical_data(historical_data):
+    """Convert historical data to JSON for download"""
+    return json.dumps(historical_data, indent=2)
+
+def load_historical_data(file_content):
+    """Load historical data from uploaded JSON file"""
+    try:
+        return json.loads(file_content)
+    except:
+        return []
+
 # Initialize session state
 if 'uploaded_powertabs_file' not in st.session_state:
     st.session_state.uploaded_powertabs_file = None
+if 'historical_data' not in st.session_state:
+    st.session_state.historical_data = []
+if 'uploaded_history_file' not in st.session_state:
+    st.session_state.uploaded_history_file = None
 
 # Sidebar - Always show first
 st.sidebar.title("📊 Dashboard Controls")
@@ -169,6 +229,36 @@ with st.sidebar.expander("📁 Upload SPINS PowerTabs File", expanded=True):
 
 st.sidebar.markdown("---")
 
+# Historical Data Management
+with st.sidebar.expander("📚 Historical Data Management", expanded=False):
+    st.markdown("Track performance over time by saving and uploading historical data")
+
+    # Upload historical data file
+    history_file = st.file_uploader(
+        "Upload Historical Data (JSON)",
+        type=['json'],
+        key='history_uploader',
+        help="Upload your previously saved historical data file"
+    )
+
+    if history_file:
+        file_content = history_file.read().decode('utf-8')
+        st.session_state.historical_data = load_historical_data(file_content)
+        st.success(f"✓ Loaded {len(st.session_state.historical_data)} historical snapshots")
+
+    # Show current history status
+    if len(st.session_state.historical_data) > 0:
+        st.info(f"📊 {len(st.session_state.historical_data)} snapshots in history")
+
+        # Option to clear history
+        if st.button("Clear History"):
+            st.session_state.historical_data = []
+            st.rerun()
+    else:
+        st.info("No historical data yet")
+
+st.sidebar.markdown("---")
+
 # Load data
 data = load_powertabs_data(st.session_state.uploaded_powertabs_file)
 
@@ -197,11 +287,34 @@ if data is None or 'overview' not in data:
     st.stop()
 
 # If data loaded successfully, continue with dashboard
+
+# Add current data to history button
+st.sidebar.markdown("### 💾 Save Current Data to History")
+col1, col2 = st.sidebar.columns(2)
+
+with col1:
+    if st.button("Save Snapshot"):
+        snapshot = extract_historical_snapshot(data)
+        st.session_state.historical_data.append(snapshot)
+        st.sidebar.success(f"✓ Saved! ({len(st.session_state.historical_data)} total)")
+
+with col2:
+    if len(st.session_state.historical_data) > 0:
+        history_json = save_historical_data(st.session_state.historical_data)
+        st.download_button(
+            label="Download",
+            data=history_json,
+            file_name=f"spins_history_{datetime.now().strftime('%Y%m%d')}.json",
+            mime="application/json"
+        )
+
+st.sidebar.markdown("---")
+
 # Navigation
 page = st.sidebar.radio(
     "Select View",
     ["💡 Strategic Insights", "🏠 Executive Overview", "🏪 Retailer Performance",
-     "📈 Growth Drivers", "🎯 Promotional Analysis"]
+     "📈 Growth Drivers", "🎯 Promotional Analysis", "📊 Historical Trends"]
 )
 
 st.sidebar.markdown("---")
@@ -831,6 +944,177 @@ elif page == "🎯 Promotional Analysis":
 
             Use these benchmarks for future promotional planning.
             """)
+
+# ====================================================================================
+# HISTORICAL TRENDS PAGE
+# ====================================================================================
+elif page == "📊 Historical Trends":
+    st.markdown("<h1 class='main-header'>📊 Historical Trends</h1>", unsafe_allow_html=True)
+    st.markdown("**Compare performance across multiple time periods**")
+    st.markdown("---")
+
+    if len(st.session_state.historical_data) == 0:
+        st.info("👈 **No historical data yet!**")
+        st.markdown("""
+        ### How to Build Historical Data:
+
+        1. **Upload your PowerTabs file** (if not already loaded)
+        2. **Click "Save Snapshot"** in the sidebar
+        3. **Download your history file** using the "Download" button
+        4. **Next month**: Upload new PowerTabs file + previous history file
+        5. **Save new snapshot** and download updated history
+
+        This creates a rolling history of your SPINS performance over time!
+        """)
+    else:
+        # Extract data for charts
+        hist_df = pd.DataFrame([
+            {
+                'upload_date': h['upload_date'],
+                'data_period': h['data_period'],
+                'sales': h['metrics'].get('sales_52w', 0),
+                'sales_growth': h['metrics'].get('sales_growth_52w', 0) * 100,
+                'units': h['metrics'].get('units_52w', 0),
+                'units_growth': h['metrics'].get('units_growth_52w', 0) * 100,
+                'retailer_count': h['metrics'].get('retailer_count', 0)
+            }
+            for h in st.session_state.historical_data
+        ])
+
+        # Add current data to comparison
+        overview = data['overview']
+        week_52 = overview[overview.iloc[:, 0] == '52 Weeks']
+        if not week_52.empty:
+            current_snapshot = {
+                'upload_date': 'Current',
+                'data_period': data.get('period_info', ''),
+                'sales': float(week_52.iloc[0, 1]),
+                'sales_growth': float(week_52.iloc[0, 2]) * 100,
+                'units': float(week_52.iloc[0, 3]),
+                'units_growth': float(week_52.iloc[0, 4]) * 100,
+                'retailer_count': len(data['retailers'])
+            }
+            hist_df = pd.concat([hist_df, pd.DataFrame([current_snapshot])], ignore_index=True)
+
+        # Sales Trend
+        st.markdown("### 📈 Sales Trend Over Time")
+
+        fig_sales = go.Figure()
+        fig_sales.add_trace(go.Scatter(
+            x=hist_df['upload_date'],
+            y=hist_df['sales'],
+            mode='lines+markers',
+            name='Sales',
+            text=[f"${val/1e6:.2f}M" for val in hist_df['sales']],
+            textposition='top center',
+            line=dict(color='#1f77b4', width=3),
+            marker=dict(size=10)
+        ))
+
+        fig_sales.update_layout(
+            title="52-Week Sales Trend",
+            xaxis_title="Period",
+            yaxis_title="Sales ($)",
+            height=400,
+            showlegend=False
+        )
+
+        st.plotly_chart(fig_sales, use_container_width=True)
+
+        # Growth Rate Comparison
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### 📊 Sales Growth %")
+            fig_growth = go.Figure()
+            fig_growth.add_trace(go.Bar(
+                x=hist_df['upload_date'],
+                y=hist_df['sales_growth'],
+                text=[f"{val:+.1f}%" for val in hist_df['sales_growth']],
+                textposition='outside',
+                marker_color=['#28a745' if x > 0 else '#dc3545' for x in hist_df['sales_growth']]
+            ))
+            fig_growth.update_layout(
+                xaxis_title="Period",
+                yaxis_title="Growth %",
+                height=350,
+                showlegend=False
+            )
+            st.plotly_chart(fig_growth, use_container_width=True)
+
+        with col2:
+            st.markdown("### 🏪 Retailer Count")
+            fig_retailers = go.Figure()
+            fig_retailers.add_trace(go.Bar(
+                x=hist_df['upload_date'],
+                y=hist_df['retailer_count'],
+                text=hist_df['retailer_count'],
+                textposition='outside',
+                marker_color='#17a2b8'
+            ))
+            fig_retailers.update_layout(
+                xaxis_title="Period",
+                yaxis_title="Number of Retailers",
+                height=350,
+                showlegend=False
+            )
+            st.plotly_chart(fig_retailers, use_container_width=True)
+
+        # Historical Data Table
+        st.markdown("---")
+        st.markdown("### 📋 Historical Data Summary")
+
+        display_hist = hist_df.copy()
+        display_hist['sales'] = display_hist['sales'].apply(lambda x: f"${x/1e6:.2f}M")
+        display_hist['sales_growth'] = display_hist['sales_growth'].apply(lambda x: f"{x:+.1f}%")
+        display_hist['units'] = display_hist['units'].apply(lambda x: f"{x/1e3:.1f}K")
+        display_hist['units_growth'] = display_hist['units_growth'].apply(lambda x: f"{x:+.1f}%")
+
+        display_hist.columns = ['Upload Date', 'Data Period', 'Sales (52W)', 'Sales Growth %', 'Units (52W)', 'Units Growth %', 'Retailers']
+
+        st.dataframe(display_hist, use_container_width=True, hide_index=True)
+
+        # Period-over-Period Comparison
+        if len(hist_df) >= 2:
+            st.markdown("---")
+            st.markdown("### 🔄 Period-over-Period Changes")
+
+            latest = hist_df.iloc[-1]
+            previous = hist_df.iloc[-2]
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                sales_change = ((latest['sales'] - previous['sales']) / previous['sales']) * 100
+                st.metric(
+                    "Sales Change",
+                    f"${latest['sales']/1e6:.2f}M",
+                    f"{sales_change:+.1f}%"
+                )
+
+            with col2:
+                growth_change = latest['sales_growth'] - previous['sales_growth']
+                st.metric(
+                    "Growth Rate Change",
+                    f"{latest['sales_growth']:+.1f}%",
+                    f"{growth_change:+.1f}pp"
+                )
+
+            with col3:
+                units_change = ((latest['units'] - previous['units']) / previous['units']) * 100
+                st.metric(
+                    "Units Change",
+                    f"{latest['units']/1e3:.1f}K",
+                    f"{units_change:+.1f}%"
+                )
+
+            with col4:
+                retailer_change = int(latest['retailer_count'] - previous['retailer_count'])
+                st.metric(
+                    "Retailer Change",
+                    int(latest['retailer_count']),
+                    f"{retailer_change:+d}"
+                )
 
 # Footer
 st.markdown("---")
